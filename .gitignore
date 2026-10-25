@@ -9,4 +9,6 @@
 
 /actionlint-checker
 /actionlint-checker.exe
-output
+
+output/
+target/
