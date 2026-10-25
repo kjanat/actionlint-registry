@@ -6,14 +6,14 @@ toolchain go1.27.3
 
 tool actionlint.kjanat.dev/v2/cmd/actionlint
 
-require actionlint.kjanat.dev/v2 v2.0.0-20261024183928-712b91ea5f12
+require actionlint.kjanat.dev/v2 v2.0.0-20261025004148-4ac04e03c0b9
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.3 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/kjanat/wacogo v0.1.0 // indirect
+	github.com/kjanat/wacogo v0.1.1 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
