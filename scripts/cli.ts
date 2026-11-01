@@ -1,9 +1,17 @@
 import { cli, command, flag, group } from '@kjanat/dreamcli';
 import { checkCandidate, checkPublished } from '@/scripts/check.ts';
+import type { CheckOptions } from '@/scripts/check.ts';
 import { claim, complete, createClient, recover } from '@/scripts/consume.ts';
 import { runFixture } from '@/scripts/fixture.ts';
 import { output } from '@/scripts/http.ts';
-import { publishPackage, submit as submitRelease, verifyPackage, waitForPublication } from '@/scripts/publish.ts';
+import {
+	publishOCI,
+	publishPackage,
+	submit as submitRelease,
+	verifyPackage,
+	waitForPublication,
+} from '@/scripts/publish.ts';
+import type { Submission } from '@/scripts/publish.ts';
 import { authorizeStatus } from '@/scripts/status-admin.ts';
 
 const check = command('check')
@@ -13,15 +21,25 @@ const check = command('check')
 	.flag('registry', flag.string().required().describe('Registry executable'))
 	.flag(
 		'actionlint',
-		flag.string().required().describe('Supported actionlint executable'),
+		flag.string().default('').describe('Supported actionlint executable'),
 	)
 	.flag(
 		'artifact',
-		flag.string().required().describe('Packaged Wasm candidate'),
+		flag.string().default('').describe('Packaged Wasm candidate or process manifest (default: artifacts/plugin.wasm)'),
+	)
+	.flag('oci', flag.string().default('').describe('OCI reference pinned by @sha256'))
+	.flag(
+		'oci-layout',
+		flag.string().default('').describe('Read the pinned OCI graph from a local ORAS image layout without network'),
 	)
 	.flag(
+		'kind',
+		flag.enum(['core', 'component', 'manifest']).describe('Execution kind, inferred from the artifact when omitted'),
+	)
+	.flag('allow-config-processes', flag.boolean().describe('Consent to execute native process plugins during checks'))
+	.flag(
 		'fixture',
-		flag.string().required().describe('Plugin behavioral fixture module'),
+		flag.string().default('').describe('Plugin behavioral fixture module'),
 	)
 	.flag(
 		'store',
@@ -34,15 +52,46 @@ const check = command('check')
 		'report',
 		flag.string().default('candidate.json').describe('Candidate check receipt'),
 	)
+	.example(
+		({ name }) =>
+			`${name} check --registry ./registry --actionlint ./actionlint --artifact ./plugin.wasm --fixture ./installation.ts`,
+		'Install a local Wasm package and verify its behavior',
+	)
+	.example(
+		({ name }) =>
+			`${name} check --registry ./registry --actionlint ./actionlint --oci "$PLUGIN_OCI_REFERENCE" --oci-layout ./plugin-layout --fixture ./installation.ts --kind manifest --allow-config-processes`,
+		'Test a local ORAS process package before uploading it',
+	)
 	.action(async ({ flags, out }) => {
-		const receipt = await checkCandidate(flags);
+		if (flags.oci && flags.artifact) {
+			throw new Error('OCI source is mutually exclusive with --artifact');
+		}
+		if (flags['oci-layout'] && !flags.oci) throw new Error('--oci-layout requires --oci');
+		if (!flags.actionlint || !flags.fixture) {
+			throw new Error('Candidate checks require --actionlint and --fixture');
+		}
+		if (flags.kind === 'manifest' && !flags['allow-config-processes']) {
+			throw new Error('Process candidate checks require explicit --allow-config-processes consent');
+		}
+		const options: CheckOptions = {
+			actionlint: flags.actionlint,
+			fixture: flags.fixture,
+			registry: flags.registry,
+			artifact: flags.oci || flags.artifact || 'artifacts/plugin.wasm',
+			store: flags.store,
+			report: flags.report,
+			allowConfigProcesses: flags['allow-config-processes'],
+			...(flags.kind === undefined ? {} : { kind: flags.kind }),
+			...(flags['oci-layout'] ? { ociLayout: flags['oci-layout'] } : {}),
+		};
+		const receipt = await checkCandidate(options);
 		await output('sha256', receipt.artifact.sha256);
 		out.json(receipt);
 	});
 
 const verify = command('verify')
 	.description(
-		'Check package files against SHA256SUMS and the tested Wasm digest',
+		'Check package files against SHA256SUMS and the distributed asset digest',
 	)
 	.flag(
 		'directory',
@@ -52,9 +101,10 @@ const verify = command('verify')
 		'asset',
 		flag.string().default('plugin.wasm').describe('Wasm asset filename'),
 	)
-	.flag('sha256', flag.string().required().describe('Tested Wasm SHA-256'))
+	.flag('kind', flag.enum(['core', 'component', 'manifest']).default('component').describe('Execution kind'))
+	.flag('sha256', flag.string().required().describe('Expected distributed asset SHA-256'))
 	.action(async ({ flags, out }) => {
-		const pkg = await verifyPackage(flags.directory, flags.asset, flags.sha256);
+		const pkg = await verifyPackage(flags.directory, flags.asset, flags.sha256, flags.kind);
 		out.json({
 			sha256: pkg.sha256,
 			files: pkg.files.map(({ name, sha256, size }) => ({
@@ -92,27 +142,35 @@ const verifyInstallation = command('verify-installation')
 			.default('installation.json')
 			.describe('Delivery verification receipt'),
 	)
+	.flag(
+		'allow-config-processes',
+		flag.boolean().describe('Consent to execute native process plugins during delivery checks'),
+	)
 	.action(async ({ flags, out }) => {
-		out.json(await checkPublished(flags));
+		out.json(await checkPublished({ ...flags, allowConfigProcesses: flags['allow-config-processes'] }));
 	});
 
 const publish = command('publish')
 	.description(
-		'Publish verified candidate bytes to GitHub and wait for registry admission',
+		'Publish a verified release asset or submit a pinned OCI source and wait for admission',
 	)
-	.flag('actionlint', flag.string().required().describe('Host executable used by the candidate check'))
-	.flag('fixture', flag.string().required().describe('Behavioral fixture used by the candidate check'))
+	.flag('actionlint', flag.string().default('').describe('Host executable used by the candidate check'))
+	.flag('fixture', flag.string().default('').describe('Behavioral fixture used by the candidate check'))
 	.flag(
 		'directory',
 		flag.string().default('artifacts').describe('Package directory'),
 	)
 	.flag(
 		'asset',
-		flag.string().default('plugin.wasm').describe('Wasm asset filename'),
+		flag.string().default('').describe('Release asset filename'),
 	)
 	.flag(
 		'sha256',
-		flag.string().required().describe('Successful candidate SHA-256'),
+		flag.string().default('').describe('Asset SHA-256'),
+	)
+	.flag(
+		'oci',
+		flag.string().default('').describe('OCI reference pinned by @sha256'),
 	)
 	.flag(
 		'repository',
@@ -133,13 +191,14 @@ const publish = command('publish')
 	.flag(
 		'kind',
 		flag
-			.enum(['core', 'component'])
+			.enum(['core', 'component', 'manifest'])
 			.default('component')
 			.describe('Plugin format'),
 	)
+	.flag('allow-config-processes', flag.boolean().describe('Consent to execute native process plugins during checks'))
 	.flag(
 		'candidate-receipt',
-		flag.string().required().describe('Successful candidate check receipt'),
+		flag.string().default('').describe('Successful candidate check receipt'),
 	)
 	.flag(
 		'notes-file',
@@ -160,16 +219,40 @@ const publish = command('publish')
 			.describe('Publication deadline, including HTTP retries'),
 	)
 	.action(async ({ flags }) => {
+		if (!flags.actionlint || !flags.fixture || !flags['candidate-receipt']) {
+			throw new Error('Publication requires --actionlint, --fixture, and --candidate-receipt from a successful check');
+		}
+		if (flags.oci) {
+			if (flags.asset || flags.sha256) {
+				throw new Error('OCI source is mutually exclusive with --asset and --sha256');
+			}
+			await publishOCI({
+				actionlint: flags.actionlint,
+				fixture: flags.fixture,
+				candidateReceipt: flags['candidate-receipt'],
+				allowConfigProcesses: flags['allow-config-processes'],
+				reference: flags.oci,
+				repository: flags.repository,
+				tag: flags.tag,
+				kind: flags.kind,
+				receipt: flags.receipt,
+				timeoutSeconds: flags['timeout-seconds'],
+			});
+			return;
+		}
+		const asset = flags.asset || (flags.kind === 'manifest' ? '' : 'plugin.wasm');
+		if (!asset || !flags.sha256) throw new Error('Supply --asset and --sha256, or supply --oci');
 		await publishPackage({
 			actionlint: flags.actionlint,
 			fixture: flags.fixture,
 			directory: flags.directory,
-			asset: flags.asset,
+			asset,
 			sha256: flags.sha256,
 			repository: flags.repository,
 			tag: flags.tag,
 			kind: flags.kind,
 			candidateReceipt: flags['candidate-receipt'],
+			allowConfigProcesses: flags['allow-config-processes'],
 			notesFile: flags['notes-file'],
 			receipt: flags.receipt,
 			timeoutSeconds: flags['timeout-seconds'],
@@ -235,22 +318,45 @@ const submit = command('submit')
 	)
 	.flag(
 		'asset',
-		flag.string().env('PLUGIN_ASSET').required().describe('Wasm release asset'),
+		flag.string().env('PLUGIN_ASSET').default('').describe('Release asset name'),
 	)
 	.flag(
 		'sha256',
-		flag.string().env('PLUGIN_SHA256').required().describe('Artifact SHA-256'),
+		flag.string().env('PLUGIN_SHA256').default('').describe('Release asset SHA-256'),
+	)
+	.flag(
+		'oci',
+		flag.string().env('PLUGIN_OCI').default('').describe('OCI reference pinned by @sha256'),
 	)
 	.flag(
 		'kind',
 		flag
-			.enum(['core', 'component'])
+			.enum(['core', 'component', 'manifest'])
 			.env('PLUGIN_KIND')
 			.required()
 			.describe('Plugin format'),
 	)
 	.action(async ({ flags }) => {
-		await submitRelease(flags, process.env, undefined, flags.provider);
+		const source: Extract<Submission, { schema_version: 2 }>['artifact'] | null = flags.oci
+			? { type: 'oci', reference: flags.oci }
+			: flags.asset && flags.sha256
+			? { type: 'release-asset', name: flags.asset, sha256: flags.sha256 }
+			: null;
+		if (source === null || (flags.oci && (flags.asset || flags.sha256))) {
+			throw new Error('Supply either --oci or both --asset and --sha256');
+		}
+		await submitRelease(
+			{
+				schema_version: 2,
+				repository: flags.repository,
+				tag: flags.tag,
+				kind: flags.kind,
+				artifact: source,
+			},
+			process.env,
+			undefined,
+			flags.provider,
+		);
 	});
 
 const consume = group('consume')
@@ -315,12 +421,17 @@ const fixture = command('fixture')
 			.required()
 			.describe('Prepare the project or verify installed behavior'),
 	)
+	.flag(
+		'allow-config-processes',
+		flag.boolean().describe('Consent to execute native process plugins during fixture checks'),
+	)
 	.action(async ({ flags }) => {
 		await runFixture(
 			flags.fixture,
 			flags.actionlint,
 			flags.directory,
 			flags.phase,
+			flags['allow-config-processes'],
 		);
 	});
 

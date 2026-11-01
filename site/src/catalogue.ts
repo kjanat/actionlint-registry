@@ -3,16 +3,39 @@ import { dirname, join } from 'node:path';
 import { catalogueSchema, downloadsSchema, entrySchema, manifestSchema, statusSchema } from '#schema.ts';
 import type { DownloadSnapshot, Entry, Metric, Plugin, Release, ReleaseStatus, SiteData } from '#schema.ts';
 
+function submissionDigest(entry: Entry): string {
+	const submission = entry.submission;
+	if (submission.schema_version === 1) return submission.sha256;
+	if (submission.artifact.type === 'release-asset') return submission.artifact.sha256;
+	const digest = /@sha256:([a-f0-9]{64})$/u.exec(submission.artifact.reference)?.[1];
+	if (!digest) throw new Error('OCI catalogue entry is not digest-pinned');
+	return digest;
+}
+
+function releaseSource(entry: Entry): Release['source'] {
+	const submission = entry.submission;
+	if (submission.schema_version === 1) {
+		return { type: 'release-asset', name: submission.asset, reference: entry.url };
+	}
+	if (submission.artifact.type === 'release-asset') {
+		return { type: 'release-asset', name: submission.artifact.name, reference: entry.url };
+	}
+	return { type: 'oci', reference: submission.artifact.reference };
+}
+
 async function readJSON(path: string): Promise<unknown> {
 	return JSON.parse(await readFile(path, 'utf8'));
 }
 
 function releaseMetric(entry: Entry, downloads: DownloadSnapshot | null): Metric {
+	if (entry.submission.schema_version === 2 && entry.submission.artifact.type === 'oci') {
+		return { state: 'unsupported' };
+	}
 	if (downloads === null) return { state: 'not collected' };
 	const found = downloads.releases.find(item =>
 		item.provider === entry.submission.provider && item.repository_id === entry.repository_id
 		&& item.version === entry.submission.tag && item.asset_id === entry.asset_id
-		&& item.sha256 === entry.submission.sha256
+		&& item.sha256 === submissionDigest(entry)
 	);
 	if (!found) return { state: 'unavailable' };
 	if (found.status === 'available' && found.count !== undefined) return { state: 'available', count: found.count };
@@ -29,10 +52,10 @@ function totalMetric(releases: Release[]): Metric {
 	return { state: 'available', count: total };
 }
 
-function statusFor(entry: Entry, statuses: ReleaseStatus[]): ReleaseStatus | undefined {
-	return statuses.find(item => item.status === 'revoked' && item.sha256 === entry.submission.sha256)
+function statusFor(entry: Entry, name: string, statuses: ReleaseStatus[]): ReleaseStatus | undefined {
+	return statuses.find(item => item.status === 'revoked' && item.sha256 === submissionDigest(entry))
 		?? statuses.findLast(item =>
-			item.name === `${entry.submission.provider}.com/${entry.submission.repository}`
+			item.name === name
 			&& item.version === entry.submission.tag
 		);
 }
@@ -48,8 +71,23 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 	}
 	const plugins = await Promise.all(catalogue.plugins.map(async item => {
 		const manifest = manifestSchema.parse(await readJSON(join(directory, item.manifest)));
+		const repository = `${manifest.plugin.provider}.com/${manifest.plugin.repository}`;
+		let selector = repository;
+		if (manifest.plugin.schema_version === 2) {
+			selector = manifest.plugin.plugin_id.toLowerCase();
+			const prefix = `${repository.toLowerCase()}/`;
+			const suffix = selector.startsWith(prefix) ? selector.slice(prefix.length) : '';
+			if (
+				!suffix
+				|| suffix.split('/').some(segment =>
+					!/^[a-z0-9_][a-z0-9._-]*$/u.test(segment) || segment === '.' || segment === '..'
+				)
+			) {
+				throw new Error(`Package identity is outside its publishing repository: ${item.name}`);
+			}
+		}
 		if (
-			`${manifest.plugin.provider}.com/${manifest.plugin.repository}` !== item.name
+			selector !== item.name
 			|| manifest.plugin.plugin_id !== item.plugin_id
 		) {
 			throw new Error(`Manifest identity disagrees with catalogue: ${item.name}`);
@@ -60,16 +98,20 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 			const entry = entrySchema.parse(await readJSON(join(directory, record)));
 			if (
 				entry.submission.tag !== version.version
-				|| `${entry.submission.provider}.com/${entry.submission.repository}` !== item.name
+				|| `${entry.submission.provider}.com/${entry.submission.repository}` !== repository
 				|| String(entry.repository_id) !== manifest.plugin.repository_id
+				|| (entry.identity_version === 2) !== (manifest.plugin.schema_version === 2)
+				|| (entry.identity_version === 2 && entry.artifact?.plugin_id !== manifest.plugin.plugin_id)
 			) throw new Error(`Release identity disagrees with manifest: ${record}`);
-			const status = statusFor(entry, statuses.releases);
+			const status = statusFor(entry, item.name, statuses.releases);
+			const digest = submissionDigest(entry);
+			const source = releaseSource(entry);
 			const release: Release = {
 				version: entry.submission.tag,
 				kind: entry.submission.kind,
-				asset: entry.submission.asset,
-				sha256: entry.submission.sha256,
-				pinnedURL: `${entry.url}#sha256=${entry.submission.sha256}`,
+				source,
+				sha256: digest,
+				pinnedURL: source.type === 'oci' ? source.reference : `${entry.url}#sha256=${digest}`,
 				record,
 				publishedAt: entry.published_at,
 				reference: `${reference}@${entry.submission.tag}`,
@@ -93,8 +135,8 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 			description: declared?.description ?? '',
 			license: declared?.license ?? '',
 			id: item.plugin_id,
-			repository: item.name,
-			repositoryURL: `https://${item.name}`,
+			repository,
+			repositoryURL: `https://${repository}`,
 			path: item.manifest.replace(/index\.json$/, 'index.html'),
 			version: newest.release.version,
 			updatedAt: newest.release.publishedAt,

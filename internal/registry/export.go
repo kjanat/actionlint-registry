@@ -12,7 +12,8 @@ import (
 
 func Find(index Index, repository, tag string) (Entry, error) {
 	for _, e := range index.Entries {
-		if (strings.EqualFold(e.Submission.Provider+"/"+e.Submission.Repository, repository) || strings.EqualFold(e.Submission.Provider+".com/"+e.Submission.Repository, repository)) && e.Submission.Tag == tag {
+		legacy := e.IdentityVersion == 0 && strings.EqualFold(e.Submission.Provider+"/"+e.Submission.Repository, repository)
+		if (legacy || strings.EqualFold(e.Name(), repository)) && e.Submission.Tag == tag {
 			return e, nil
 		}
 	}
@@ -78,7 +79,7 @@ func export(index Index, directory string, statuses []ReleaseStatus, downloads *
 		}
 		accepted := false
 		for _, entry := range index.Entries {
-			if entry.Submission.SHA256 == item.Report.ArtifactSHA256 {
+			if entry.Submission.Digest() == item.Report.ArtifactSHA256 {
 				accepted = true
 			}
 		}
@@ -98,18 +99,18 @@ func export(index Index, directory string, statuses []ReleaseStatus, downloads *
 	catalog := Catalog{SchemaVersion: 1, Statuses: "statuses.json", Plugins: []CatalogPlugin{}}
 	manifests := map[string]PluginManifest{}
 	for _, entry := range index.Entries {
-		id := entry.Receipt.PluginKey()
+		id := entry.PluginKey()
 		manifest, ok := manifests[id]
 		if !ok {
 			manifest = PluginManifest{Plugin: pluginFor(entry), Versions: []VersionLink{}}
-			plugin := CatalogPlugin{Name: entry.Submission.Provider + ".com/" + entry.Submission.Repository, PluginID: entry.PluginID(), Manifest: "plugins/" + id + "/index.json"}
+			plugin := CatalogPlugin{Name: entry.Name(), PluginID: entry.PluginID(), Manifest: "plugins/" + id + "/index.json"}
 			if aliases != nil {
 				plugin.Aliases = aliases.For(plugin.Name)
 			}
 			catalog.Plugins = append(catalog.Plugins, plugin)
 		}
 		filename := key(entry.Submission.Tag) + ".json"
-		manifest.Versions = append(manifest.Versions, VersionLink{Version: entry.Submission.Tag, Record: "versions/" + filename, Compatibility: append([]CompatibilityLink{}, observations[entry.Submission.SHA256]...)})
+		manifest.Versions = append(manifest.Versions, VersionLink{Version: entry.Submission.Tag, Record: "versions/" + filename, Compatibility: append([]CompatibilityLink{}, observations[entry.Submission.Digest()]...)})
 		manifests[id] = manifest
 		if err := WriteJSON(filepath.Join(directory, "plugins", id, "versions", filename), entry); err != nil {
 			return err

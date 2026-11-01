@@ -34,10 +34,13 @@ func NewGitLab() *GitLab {
 	return &GitLab{client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("GitLab redirect refused") }}}
 }
 func releaseURL(s Submission, id int64) string {
+	if s.IsOCI() {
+		return s.Artifact.Reference()
+	}
 	if s.Provider == "github" {
 		return assetURL(s)
 	}
-	return "https://gitlab.com/api/v4/projects/" + strconv.FormatInt(id, 10) + "/packages/generic/actionlint-plugin/" + url.PathEscape(s.Tag) + "/" + url.PathEscape(s.Asset)
+	return "https://gitlab.com/api/v4/projects/" + strconv.FormatInt(id, 10) + "/packages/generic/actionlint-plugin/" + url.PathEscape(s.Tag) + "/" + url.PathEscape(s.AssetName())
 }
 func (g *GitLab) get(ctx context.Context, path string, value any) (err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://gitlab.com/api/v4/"+path, nil)
@@ -81,6 +84,22 @@ func (g *GitLab) ResolveRelease(ctx context.Context, s Submission) (Release, err
 	}
 	if project.ID <= 0 || project.Namespace.ID <= 0 || project.Visibility != "public" || !strings.EqualFold(project.Path, s.Repository) {
 		return Release{}, errors.New("GitLab project must be public with canonical identity")
+	}
+	if s.IsOCI() {
+		var tag struct {
+			Name   string `json:"name"`
+			Commit struct {
+				ID          string    `json:"id"`
+				CommittedAt time.Time `json:"committed_date"`
+			} `json:"commit"`
+		}
+		if err := g.get(ctx, "projects/"+strconv.FormatInt(project.ID, 10)+"/repository/tags/"+url.PathEscape(s.Tag), &tag); err != nil {
+			return Release{}, err
+		}
+		if tag.Name != s.Tag || !commitPattern.MatchString(tag.Commit.ID) || tag.Commit.CommittedAt.IsZero() {
+			return Release{}, reject("invalid public GitLab tag identity")
+		}
+		return Release{Entry: Entry{Submission: s, RepositoryID: project.ID, OwnerID: project.Namespace.ID, Commit: tag.Commit.ID, PublishedAt: tag.Commit.CommittedAt, URL: releaseURL(s, project.ID)}}, nil
 	}
 	var release struct {
 		Tag        string    `json:"tag_name"`
@@ -136,7 +155,7 @@ func (g *GitLab) DownloadRelease(ctx context.Context, s Submission, r Release, p
 	if err = errors.Join(copyErr, f.Close()); err != nil {
 		return err
 	}
-	if n == 0 || n > MaxArtifactBytes || hex.EncodeToString(hash.Sum(nil)) != s.SHA256 {
+	if n == 0 || n > MaxArtifactBytes || hex.EncodeToString(hash.Sum(nil)) != s.Digest() {
 		return errors.New("GitLab package size or SHA256 mismatch")
 	}
 	return nil

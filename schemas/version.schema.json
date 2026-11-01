@@ -37,6 +37,9 @@
     "commit": {
       "$ref": "#/$defs/commit"
     },
+    "identity_version": {
+      "const": 2
+    },
     "owner_id": {
       "type": "integer",
       "minimum": 1

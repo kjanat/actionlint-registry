@@ -39,7 +39,10 @@ func CheckCompatibility(ctx context.Context, executable, path string, entry Entr
 	if err = entry.Submission.Validate(); err != nil {
 		return evidence, err
 	}
-	return CheckArtifact(ctx, executable, path, entry.Submission.SHA256)
+	if entry.Submission.IsOCI() {
+		return evidence, errors.New("this checker accepts local package bytes; OCI graph checks are unsupported")
+	}
+	return CheckArtifact(ctx, executable, path, entry.Submission.Digest())
 }
 
 // CheckArtifact observes a local candidate without requiring publication. The
@@ -67,7 +70,7 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest string)
 	if err != nil {
 		return evidence, err
 	}
-	snapshot := filepath.Join(dir, "plugin.wasm")
+	snapshot := filepath.Join(dir, "plugin"+filepath.Ext(path))
 	digest, err := snapshotFile(path, snapshot, MaxArtifactBytes, 0o600)
 	if err != nil {
 		return evidence, err

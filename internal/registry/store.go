@@ -22,12 +22,23 @@ type Plugin struct {
 }
 
 func pluginFor(e Entry) Plugin {
+	version := 1
+	if e.IdentityVersion == 2 {
+		version = 2
+	}
 	return Plugin{
-		SchemaVersion: 1,
+		SchemaVersion: version,
 		Issuer:        e.Receipt.Identity.Issuer, RepositoryID: e.Receipt.Identity.RepositoryID,
 		OwnerID: e.Receipt.Identity.OwnerID, Provider: e.Submission.Provider,
 		Repository: e.Submission.Repository, PluginID: e.PluginID(),
 	}
+}
+
+func (p Plugin) key() string {
+	if p.SchemaVersion == 2 {
+		return key("package-v2\n" + p.Issuer + "\n" + p.RepositoryID + "\n" + p.PluginID)
+	}
+	return key(p.Issuer + "\n" + p.RepositoryID)
 }
 
 type Store struct{ Directory string }
@@ -103,7 +114,7 @@ func (s Store) Load() (Index, error) {
 		if err = readRecord(filepath.Join(base, "plugin.json"), &plugin); err != nil {
 			return index, err
 		}
-		if plugin.SchemaVersion != 1 || dir.Name() != key(plugin.Issuer+"\n"+plugin.RepositoryID) {
+		if plugin.SchemaVersion != 1 && plugin.SchemaVersion != 2 || dir.Name() != plugin.key() {
 			return index, errors.New("plugin path disagrees with identity")
 		}
 		children, err := os.ReadDir(base)
@@ -174,7 +185,7 @@ func (s Store) Merge(candidate Index) error {
 		return nil
 	}
 	for _, entry := range candidate.Entries {
-		base := filepath.Join(s.Directory, entry.Receipt.PluginKey())
+		base := filepath.Join(s.Directory, entry.PluginKey())
 		if err = safePath(base); err != nil {
 			return err
 		}

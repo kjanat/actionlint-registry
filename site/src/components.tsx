@@ -397,7 +397,9 @@ export function PluginPage({ plugin, observedAt }: { plugin: Plugin; observedAt:
 								{release.reason && <p class='reason'>{release.reason}</p>}
 								{release.replacement && <p class='reason'>Replacement: {release.replacement}</p>}
 								<div class='actions'>
-									<a href={release.pinnedURL}>Download {release.asset}</a>
+									{release.source.type === 'release-asset'
+										? <a href={release.pinnedURL}>Download {release.source.name}</a>
+										: <span>OCI image</span>}
 									<a href={`${root}${release.record}`}>
 										Publication record<span class='sr-only'>for {release.version}</span>
 									</a>

@@ -32,7 +32,7 @@ type DownloadSnapshot struct {
 // DownloadCount reads asset metadata without downloading the artifact. Matching
 // the immutable asset ID and digest prevents counting a replacement release.
 func (g *GitHub) DownloadCount(ctx context.Context, entry Entry) (int64, error) {
-	if entry.Submission.Provider != "github" || entry.AssetID <= 0 {
+	if entry.Submission.IsOCI() || entry.Submission.Provider != "github" || entry.AssetID <= 0 {
 		return 0, errors.New("download counts require a GitHub asset identity")
 	}
 	if err := entry.Submission.Validate(); err != nil {
@@ -43,8 +43,8 @@ func (g *GitHub) DownloadCount(ctx context.Context, entry Entry) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
-	if asset.GetID() != entry.AssetID || asset.GetName() != entry.Submission.Asset ||
-		asset.GetDigest() != "sha256:"+entry.Submission.SHA256 || asset.GetState() != "uploaded" ||
+	if asset.GetID() != entry.AssetID || asset.GetName() != entry.Submission.AssetName() ||
+		asset.GetDigest() != "sha256:"+entry.Submission.Digest() || asset.GetState() != "uploaded" ||
 		asset.DownloadCount == nil || asset.GetDownloadCount() < 0 {
 		return 0, errors.New("download count missing or asset identity changed")
 	}
@@ -65,10 +65,10 @@ func collectDownloads(ctx context.Context, index Index, counter downloadCounter)
 		observation := DownloadObservation{
 			Provider: entry.Submission.Provider, Repository: entry.Submission.Repository,
 			RepositoryID: entry.RepositoryID, Version: entry.Submission.Tag,
-			Asset: entry.Submission.Asset, AssetID: entry.AssetID, SHA256: entry.Submission.SHA256,
+			Asset: entry.Submission.AssetName(), AssetID: entry.AssetID, SHA256: entry.Submission.Digest(),
 			Status: "unsupported",
 		}
-		if observation.Provider == "github" {
+		if observation.Provider == "github" && !entry.Submission.IsOCI() {
 			observation.Status = "unavailable"
 			// A failed or rate-limited metrics request must not block publication.
 			if ctx.Err() == nil {

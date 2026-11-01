@@ -10,6 +10,7 @@ import {
 	TransportError,
 } from '@/scripts/http.ts';
 import { submit } from '@/scripts/publish.ts';
+import type { Submission } from '@/scripts/publish.ts';
 
 class RecordedClient extends HTTPClient {
 	readonly calls: { url: string; init: RequestInit }[] = [];
@@ -111,6 +112,36 @@ test('OIDC uses the registry audience and submits only release metadata', async 
 		sha256: 'a'.repeat(64),
 		kind: 'component',
 	});
+});
+
+test('v2 submits process assets and digest-pinned OCI references without flat fields', async () => {
+	const sources: Pick<Extract<Submission, { schema_version: 2 }>, 'kind' | 'artifact'>[] = [
+		{
+			kind: 'manifest',
+			artifact: { type: 'release-asset', name: 'plugin.json.gz', sha256: 'b'.repeat(64) },
+		},
+		{
+			kind: 'component',
+			artifact: { type: 'oci', reference: `oci://ghcr.io:5443/owner/plugin@sha256:${'c'.repeat(64)}` },
+		},
+		{
+			kind: 'manifest',
+			artifact: { type: 'oci', reference: `oci://ghcr.io/owner/process-plugin@sha256:${'d'.repeat(64)}` },
+		},
+	];
+	for (const source of sources) {
+		const client = new RecordedClient({ value: token }, { id: identifier, status: 'pending' });
+		await submit({ schema_version: 2, repository: 'owner/repo', tag: 'v2', ...source }, environment, client);
+		const body = client.calls[1]?.init.body;
+		assert.equal(typeof body, 'string');
+		assert.deepEqual(JSON.parse(String(body)), {
+			schema_version: 2,
+			provider: 'github',
+			repository: 'owner/repo',
+			tag: 'v2',
+			...source,
+		});
+	}
 });
 
 test('unsafe endpoints and release names fail before credentials leave the process', async () => {

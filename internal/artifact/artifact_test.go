@@ -143,3 +143,39 @@ func TestMetadataAllowsCaseVariantExtensions(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessDiscoveryFraming(t *testing.T) {
+	metadata := bytes.Replace(declarationJSON("core"), []byte("wasm-core-json"), []byte("process"), 1)
+	valid := []byte(`{"schema_version":1,"id":"example","version":"1.0.0","transport":"process","metadata":` + string(metadata) + `,"future_runtime":{"extension":true}}`)
+	declaration, err := inspectBytes(t, valid)
+	if err != nil || declaration.Kind != "manifest" || declaration.Contract != "process/1" || !bytes.Equal(declaration.Metadata, metadata) {
+		t.Fatal("process discovery lost", declaration, err)
+	}
+	for name, data := range map[string][]byte{
+		"root-id":          bytes.Replace(valid, []byte(`"id":"example"`), []byte(`"id":"forged"`), 1),
+		"root-version":     bytes.Replace(valid, []byte(`"version":"1.0.0"`), []byte(`"version":"2.0.0"`), 1),
+		"schema":           bytes.Replace(valid, []byte(`"schema_version":1`), []byte(`"schema_version":2`), 1),
+		"transport":        bytes.Replace(valid, []byte(`"transport":"process"`), []byte(`"transport":"embedded"`), 1),
+		"duplicate":        bytes.Replace(valid, []byte(`"schema_version":1`), []byte(`"schema_version":1,"schema_version":1`), 1),
+		"missing-metadata": []byte(`{"schema_version":1,"id":"example","version":"1.0.0","transport":"process"}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := inspectBytes(t, data); err == nil {
+				t.Fatal("invalid process discovery accepted")
+			}
+		})
+	}
+}
+
+func TestEmbeddedProcessProgramRemainsDiscoveryData(t *testing.T) {
+	metadata := bytes.Replace(declarationJSON("core"), []byte("wasm-core-json"), []byte("process"), 1)
+	data := []byte(`{"schema_version":1,"id":"example","version":"1.0.0","transport":"process","role":"document","requires":["source"],"metadata":` + string(metadata) + `,"process":{"entry":"node","args":["{program-file}"],"program":{"filename":"actionlint.mjs","inline":"throw new Error('inspection must never execute this program');"}}}`)
+	declaration, err := inspectBytes(t, data)
+	if err != nil || declaration.Kind != "manifest" || declaration.Contract != "process/1" {
+		t.Fatal("embedded source changed discovery admission", declaration, err)
+	}
+	sum := sha256.Sum256(data)
+	if declaration.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatal("embedded program not bound by package digest")
+	}
+}

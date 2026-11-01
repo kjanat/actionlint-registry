@@ -8,6 +8,7 @@ export async function runFixture(
 	host: string,
 	directory: string,
 	phase: 'prepare' | 'verify',
+	allowConfigProcesses = false,
 ): Promise<void> {
 	const loaded: unknown = await import(pathToFileURL(fixture).href);
 	const module = object(loaded);
@@ -23,8 +24,10 @@ export async function runFixture(
 	}
 	const result: unknown = await module.verify({
 		directory,
-		run: (args: string[], expected = 0) => execute(host, args, directory, process.env, expected),
-		runResult: (args: string[], expected = 0) => executeResult(host, args, directory, process.env, expected),
+		run: (args: string[], expected = 0) =>
+			execute(host, withProcessConsent(args, allowConfigProcesses), directory, process.env, expected),
+		runResult: (args: string[], expected = 0) =>
+			executeResult(host, withProcessConsent(args, allowConfigProcesses), directory, process.env, expected),
 	});
 	const checked = object(result);
 	const checks = strings(checked.checks);
@@ -33,4 +36,10 @@ export async function runFixture(
 		throw new Error('Fixture must return checks and a check --json probe');
 	}
 	process.stdout.write(`${JSON.stringify({ checks, probe })}\n`);
+}
+
+function withProcessConsent(args: string[], allowConfigProcesses: boolean): string[] {
+	return allowConfigProcesses && args[0] === 'check' && !args.includes('--allow-config-processes')
+		? [...args, '--allow-config-processes']
+		: args;
 }

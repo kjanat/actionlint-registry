@@ -66,6 +66,60 @@ test('replay is idempotent; changed body or fresh-token digest/kind replacement 
 	).toThrow('version is already bound');
 });
 
+test('legacy release keys retain submission identity and leases after source-union upgrades', () => {
+	const db = new Database(':memory:');
+	const inbox = store(db);
+	const accepted = inbox.submit(s, auth, 'original', 100);
+	const claim = inbox.claim(identity, 101).claim;
+	if (claim === null) throw new Error('missing legacy claim');
+	// This is the durable key written before OCI/source unions existed.
+	db.query('UPDATE submissions SET version_key=? WHERE id=?').run(
+		JSON.stringify([identity.issuer, identity.repository_id, s.tag, 'plugin.wasm']),
+		accepted.id,
+	);
+	expect(inbox.submit(s, { ...auth, jti: 'fresh' }, 'original', 102)).toEqual({
+		id: accepted.id,
+		status: 'validating',
+		validator_run: 'https://github.com/acme/plugin/actions/runs/30/attempts/1',
+	});
+	expect(() => inbox.submit(submission({ ...s, sha256: 'b'.repeat(64) }), { ...auth, jti: 'changed' }, 'changed', 103))
+		.toThrow('version is already bound');
+	expect(() =>
+		inbox.submit(
+			submission({
+				schema_version: 2,
+				provider: 'github',
+				repository: s.repository,
+				tag: s.tag,
+				kind: 'core',
+				artifact: { type: 'release-asset', name: 'plugin.wasm', sha256: 'b'.repeat(64) },
+			}),
+			{ ...auth, jti: 'changed-schema' },
+			'changed-schema',
+			104,
+		)
+	).toThrow('version is already bound');
+	expect(inbox.complete(accepted.id, identity, claim.lease_id, 'published', undefined, 105).status).toBe('published');
+	expect(db.query('SELECT count(*) AS n FROM submissions').get()).toEqual({ n: 1 });
+});
+
+test('OCI digest changes cannot replace an accepted publisher reference and tag', async () => {
+	const inbox = store();
+	const make = (digestValue: string) =>
+		submission({
+			schema_version: 2,
+			provider: 'github',
+			repository: 'acme/plugin',
+			tag: 'v2',
+			kind: 'component',
+			artifact: { type: 'oci', reference: `oci://ghcr.io/acme/plugin@sha256:${digestValue}` },
+		});
+	inbox.submit(make('a'.repeat(64)), auth, 'first', 100);
+	expect(() => inbox.submit(make('b'.repeat(64)), { ...auth, jti: 'new-token' }, 'second', 101)).toThrow(
+		'version is already bound',
+	);
+});
+
 test('claims have owner/run-specific leases; completion is idempotent', () => {
 	const inbox = store();
 	const accepted = inbox.submit(s, auth, 'hash', 100);
@@ -179,7 +233,16 @@ test('fresh publisher authorization recovers identical failed submissions with a
 		validator_run: 'https://github.com/acme/plugin/actions/runs/30/attempts/1',
 	});
 	expect(inbox.submit(s, authorization, 'hash', 10901).status).toBe('failed');
-	expect(() => inbox.submit({ ...s, sha256: 'b'.repeat(64) }, { ...authorization, jti: 'new' }, 'changed', 10901))
+	const changedDigest = submission({
+		schema_version: 1,
+		provider: 'github',
+		repository: 'acme/plugin',
+		tag: 'v1',
+		asset: 'plugin.wasm',
+		sha256: 'b'.repeat(64),
+		kind: 'core',
+	});
+	expect(() => inbox.submit(changedDigest, { ...authorization, jti: 'new' }, 'changed', 10901))
 		.toThrow('version is already bound');
 	const recovered = inbox.submit(s, { ...authorization, jti: 'new' }, 'hash', 10901);
 	expect(recovered).toEqual({ id: accepted.id, status: 'pending' });

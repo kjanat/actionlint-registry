@@ -107,6 +107,11 @@ func declaration(kind string, data []byte) (Declaration, error) {
 			return Declaration{}, errors.New("component declaration requires an interface and contract checksum")
 		}
 		contract = component.Interface + "#sha256=" + component.Digest
+	case "manifest":
+		if m.Transport != "process" {
+			return Declaration{}, errors.New("process declaration requires process transport")
+		}
+		contract = "process/1"
 	default:
 		return Declaration{}, errors.New("unsupported artifact format")
 	}
@@ -185,6 +190,27 @@ func Inspect(ctx context.Context, path string) (result Declaration, err error) {
 	}
 	if len(data) > MaxModule {
 		return result, errors.New("expanded artifact exceeds 128 MiB")
+	}
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+		var manifest struct {
+			SchemaVersion int             `json:"schema_version"`
+			ID            string          `json:"id"`
+			Version       string          `json:"version"`
+			Transport     string          `json:"transport"`
+			Metadata      json.RawMessage `json:"metadata"`
+		}
+		if err = jsonv2.Unmarshal(data, &manifest); err != nil {
+			return result, fmt.Errorf("process manifest: %w", err)
+		}
+		if manifest.SchemaVersion != 1 || manifest.Transport != "process" {
+			return result, errors.New("process manifest requires schema_version 1 and process transport")
+		}
+		result, err = declaration("manifest", manifest.Metadata)
+		if err == nil && (manifest.ID != result.PluginID || manifest.Version != result.PluginVersion) {
+			err = errors.New("process manifest identity disagrees with discovery metadata")
+		}
+		result.SHA256 = hex.EncodeToString(sum[:])
+		return result, err
 	}
 	if len(data) < 8 || !bytes.Equal(data[:4], []byte{0, 97, 115, 109}) {
 		return result, errors.New("invalid WASM header")

@@ -36,7 +36,7 @@ func (a Aliases) Validate(index Index) error {
 	}
 	published := map[string]bool{}
 	for _, entry := range index.Entries {
-		published[strings.ToLower(entry.Submission.Provider+".com/"+entry.Submission.Repository)] = true
+		published[entry.Name()] = true
 	}
 	for alias, target := range a.Aliases {
 		if !aliasPattern.MatchString(alias) {
@@ -46,7 +46,7 @@ func (a Aliases) Validate(index Index) error {
 		provider := strings.TrimSuffix(host, ".com")
 		if !ok || (host != "github.com" && host != "gitlab.com") ||
 			target.Repository != strings.ToLower(target.Repository) || len(repository) > 512 ||
-			(provider == "github" && !repositoryPattern.MatchString(repository)) ||
+			(provider == "github" && !repositoryPattern.MatchString(repository) && !validGitHubPackage(target.Repository)) ||
 			(provider == "gitlab" && !gitlabRepositoryPattern.MatchString(repository)) {
 			return fmt.Errorf("alias %q has invalid canonical repository %q", alias, target.Repository)
 		}
@@ -55,6 +55,11 @@ func (a Aliases) Validate(index Index) error {
 		}
 	}
 	return nil
+}
+
+func validGitHubPackage(name string) bool {
+	parts := strings.Split(name, "/")
+	return len(parts) > 3 && repositoryPattern.MatchString(strings.Join(parts[1:3], "/")) && packageID(name, strings.Join(parts[:3], "/"))
 }
 
 func (a Aliases) For(repository string) []string {

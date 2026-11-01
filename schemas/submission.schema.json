@@ -4,15 +4,16 @@
   "title": "actionlint plugin submission",
   "type": "object",
   "required": [
-    "asset",
     "kind",
     "provider",
     "repository",
     "schema_version",
-    "sha256",
     "tag"
   ],
   "properties": {
+    "artifact": {
+      "$ref": "distribution.schema.json"
+    },
     "asset": {
       "type": "string",
       "maxLength": 128,
@@ -21,14 +22,15 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
         },
         {
-          "pattern": "\\.wasm(\\.gz)?$"
+          "pattern": "\\.(wasm|json)(\\.gz)?$"
         }
       ]
     },
     "kind": {
       "enum": [
         "core",
-        "component"
+        "component",
+        "manifest"
       ]
     },
     "provider": {
@@ -43,7 +45,10 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)+$"
     },
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "sha256": {
       "type": "string",
@@ -86,6 +91,91 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)+$"
           }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "manifest"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifact": {
+            "properties": {
+              "name": {
+                "pattern": "\\.json(\\.gz)?$"
+              }
+            }
+          },
+          "asset": {
+            "pattern": "\\.json(\\.gz)?$"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "artifact": {
+            "properties": {
+              "name": {
+                "pattern": "\\.wasm(\\.gz)?$"
+              }
+            }
+          },
+          "asset": {
+            "pattern": "\\.wasm(\\.gz)?$"
+          }
+        }
+      }
+    }
+  ],
+  "oneOf": [
+    {
+      "required": [
+        "asset",
+        "sha256"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "core",
+            "component"
+          ]
+        },
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "not": {
+        "required": [
+          "artifact"
+        ]
+      }
+    },
+    {
+      "required": [
+        "artifact"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 2
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "asset"
+            ]
+          },
+          {
+            "required": [
+              "sha256"
+            ]
+          }
+        ]
       }
     }
   ]

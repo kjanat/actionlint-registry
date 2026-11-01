@@ -61,7 +61,18 @@ export function exactKeys(
 	}
 }
 
-export interface Submission {
+export interface ReleaseAssetSource {
+	type: 'release-asset';
+	name: string;
+	sha256: string;
+}
+
+export interface OCISource {
+	type: 'oci';
+	reference: string;
+}
+
+export type Submission = {
 	schema_version: 1;
 	provider: 'github' | 'gitlab';
 	repository: string;
@@ -69,10 +80,101 @@ export interface Submission {
 	asset: string;
 	sha256: string;
 	kind: 'core' | 'component';
+} | {
+	schema_version: 2;
+	provider: 'github' | 'gitlab';
+	repository: string;
+	tag: string;
+	kind: 'core' | 'component' | 'manifest';
+	artifact: ReleaseAssetSource | OCISource;
+};
+
+export function sourceIdentity(value: Submission): string {
+	// Release filenames preserve the durable v1 version key. Changing their
+	// encoding would create new submissions and bypass existing digest bindings.
+	if (value.schema_version === 1) return value.asset;
+	if (value.artifact.type === 'release-asset') {
+		return value.artifact.name;
+	}
+	return JSON.stringify({ type: value.artifact.type, name: value.artifact.reference.split('@sha256:')[0] });
+}
+
+export function sourceDigest(value: Submission): string {
+	if (value.schema_version === 1) return value.sha256;
+	if (value.artifact.type === 'release-asset') return value.artifact.sha256;
+	const digest = /@sha256:([a-f0-9]{64})$/u.exec(value.artifact.reference)?.[1];
+	if (!digest) throw new Error('Validated OCI source has no digest');
+	return digest;
+}
+
+function ociReference(value: unknown): string {
+	const reference = text(value, 2048);
+	const match =
+		/^oci:\/\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::([0-9]{1,5}))?(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$/u
+			.exec(reference);
+	const port = match?.[1];
+	if (!match || (port !== undefined && (Number(port) < 1 || Number(port) > 65535))) {
+		throw new HttpError(400, 'The OCI reference must use a pinned SHA-256 digest.');
+	}
+	return reference;
 }
 
 export function submission(value: unknown): Submission {
 	const v = object(value);
+	if (v.schema_version === 2) {
+		exactKeys(v, ['schema_version', 'provider', 'repository', 'tag', 'kind', 'artifact']);
+		if (
+			(v.provider !== 'github' && v.provider !== 'gitlab')
+			|| (v.kind !== 'core' && v.kind !== 'component' && v.kind !== 'manifest')
+		) {
+			throw new HttpError(400, 'The submission specifies an unsupported provider or execution kind.');
+		}
+		const repository = text(v.repository, 512).toLowerCase();
+		const parts = repository.split('/');
+		if (
+			parts.length < 2 || (v.provider === 'github' && parts.length !== 2)
+			|| parts.some(p => !/^[a-z0-9][a-z0-9._-]*$/u.test(p) || p.endsWith('.git'))
+		) {
+			throw new HttpError(400, 'The repository path is invalid for the selected provider.');
+		}
+		const tag = text(v.tag, 128);
+		if (!/^[A-Za-z0-9][A-Za-z0-9._+-]*$/u.test(tag)) {
+			throw new HttpError(400, 'The release tag is invalid.');
+		}
+		const artifact = object(v.artifact);
+		if (artifact.type === 'release-asset') {
+			exactKeys(artifact, ['type', 'name', 'sha256']);
+			const name = text(artifact.name, 128);
+			const sha256 = text(artifact.sha256, 64);
+			const extension = v.kind === 'manifest' ? /\.json(?:\.gz)?$/u : /\.wasm(?:\.gz)?$/u;
+			if (
+				!/^[A-Za-z0-9][A-Za-z0-9._+-]*$/u.test(name) || !extension.test(name)
+				|| !/^[a-f0-9]{64}$/u.test(sha256)
+			) {
+				throw new HttpError(400, 'The release asset name or SHA-256 checksum is invalid.');
+			}
+			return {
+				schema_version: 2,
+				provider: v.provider,
+				repository,
+				tag,
+				kind: v.kind,
+				artifact: { type: 'release-asset', name, sha256 },
+			};
+		}
+		if (artifact.type === 'oci') {
+			exactKeys(artifact, ['type', 'reference']);
+			return {
+				schema_version: 2,
+				provider: v.provider,
+				repository,
+				tag,
+				kind: v.kind,
+				artifact: { type: 'oci', reference: ociReference(artifact.reference) },
+			};
+		}
+		throw new HttpError(400, 'The submission artifact source is unsupported.');
+	}
 	exactKeys(v, [
 		'schema_version',
 		'provider',

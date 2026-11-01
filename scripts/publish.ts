@@ -6,6 +6,8 @@ import { join } from 'node:path';
 const registryOrigin = 'https://registry.actionlint.kjanat.dev';
 const filePattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
 const digestPattern = /^[0-9a-f]{64}$/;
+const ociReferencePattern =
+	/^oci:\/\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::([0-9]{1,5}))?(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$/u;
 const identifierPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 import { HTTPClient, HTTPError, oidcToken, output, requestJSON, TransportError } from '@/scripts/http.ts';
@@ -44,14 +46,23 @@ function integer(value: unknown, label: string): number {
 	return value;
 }
 
+function validOCIReference(reference: string): boolean {
+	if (reference.length > 2048) return false;
+	const match = ociReferencePattern.exec(reference);
+	const port = match?.[1];
+	return match !== null && (port === undefined || (Number(port) >= 1 && Number(port) <= 65535));
+}
+
 export async function verifyPackage(
 	directory: string,
 	asset: string,
 	expected: string,
+	kind: 'core' | 'component' | 'manifest' = 'component',
 ): Promise<Package> {
+	const extension = kind === 'manifest' ? /\.json(?:\.gz)?$/u : /\.wasm(?:\.gz)?$/u;
 	if (
 		!filePattern.test(asset)
-		|| !/\.wasm(?:\.gz)?$/.test(asset)
+		|| !extension.test(asset)
 		|| !digestPattern.test(expected)
 	) {
 		throw new Error('Supply a Wasm asset filename and its tested SHA-256');
@@ -317,12 +328,28 @@ export class GitHubPublisher {
 	}
 }
 
-export interface Submission {
+export type Submission = {
 	repository: string;
 	tag: string;
 	asset: string;
 	sha256: string;
 	kind: 'core' | 'component';
+} | {
+	schema_version: 2;
+	repository: string;
+	tag: string;
+	kind: 'core' | 'component' | 'manifest';
+	artifact:
+		| { type: 'release-asset'; name: string; sha256: string }
+		| { type: 'oci'; reference: string };
+};
+
+export function submissionDigest(entry: Submission): string {
+	if ('asset' in entry) return entry.sha256;
+	if (entry.artifact.type === 'release-asset') return entry.artifact.sha256;
+	const digest = /@sha256:([a-f0-9]{64})$/u.exec(entry.artifact.reference)?.[1];
+	if (!digest) throw new Error('OCI source must be pinned to a SHA-256 digest');
+	return digest;
 }
 
 export async function verifyCandidateReceipt(
@@ -337,22 +364,33 @@ export async function verifyCandidateReceipt(
 	const installation = object(receipt.installation);
 	const host = object(receipt.host);
 	const fixture = object(receipt.fixture);
+	const digest = submissionDigest(entry);
 	if (
 		receipt.schema_version !== 1
 		|| receipt.offline !== true
 		|| receipt.missing_cache_rejected !== true
-		|| artifact.sha256 !== entry.sha256
+		|| artifact.sha256 !== digest
 		|| artifact.kind !== entry.kind
 		|| text(artifact.repository, 'candidate repository').toLowerCase()
 			!== `https://github.com/${entry.repository}`.toLowerCase()
 		|| text(artifact.plugin_version, 'candidate version').replace(/^v/, '') !== entry.tag.replace(/^v/, '')
-		|| installation.sha256 !== entry.sha256
+		|| installation.sha256 !== digest
+		|| (installation.name !== undefined
+			&& installation.name
+				!== text(artifact.repository, 'candidate repository').replace(/^https:\/\//u, '').toLowerCase()
+			&& (installation.name !== text(artifact.plugin_id, 'candidate plugin ID').toLowerCase()
+				|| !text(installation.name, 'installed package name').startsWith(
+					`${text(artifact.repository, 'candidate repository').replace(/^https:\/\//u, '').toLowerCase()}/`,
+				)))
+		|| (installation.repository !== undefined
+			&& installation.repository !== text(artifact.repository, 'candidate repository').replace(/^https:\/\//u, ''))
 		|| text(installation.version, 'installed version').replace(/^v/, '') !== entry.tag.replace(/^v/, '')
 		|| !digestPattern.test(text(host.sha256, 'candidate host digest'))
 		|| !digestPattern.test(text(fixture.sha256, 'candidate fixture digest'))
 		|| !Array.isArray(fixture.checks)
 		|| fixture.checks.length === 0
 		|| fixture.checks.some((check) => typeof check !== 'string' || !check.trim())
+		|| (entry.kind === 'manifest' && receipt.allow_config_processes !== true)
 	) {
 		throw new Error(
 			'Candidate receipt does not match this release or lacks successful installation and offline checks',
@@ -390,17 +428,25 @@ export async function submit(
 		throw new Error('Invalid repository path');
 	}
 	if (!filePattern.test(entry.tag)) throw new Error('Invalid release tag');
-	if (!filePattern.test(entry.asset) || !/\.wasm(?:\.gz)?$/.test(entry.asset)) {
-		throw new Error('Asset must be a Wasm release filename');
-	}
-	if (!digestPattern.test(entry.sha256)) {
-		throw new Error('Invalid artifact SHA-256');
+	if ('asset' in entry) {
+		if (!filePattern.test(entry.asset) || !/\.wasm(?:\.gz)?$/.test(entry.asset)) {
+			throw new Error('Asset must be a Wasm release filename');
+		}
+		if (!digestPattern.test(entry.sha256)) throw new Error('Invalid artifact SHA-256');
+	} else if (entry.artifact.type === 'release-asset') {
+		const extension = entry.kind === 'manifest' ? /\.json(?:\.gz)?$/u : /\.wasm(?:\.gz)?$/u;
+		if (
+			!filePattern.test(entry.artifact.name) || !extension.test(entry.artifact.name)
+			|| !digestPattern.test(entry.artifact.sha256)
+		) {
+			throw new Error('Invalid release asset name or SHA-256');
+		}
+	} else if (!validOCIReference(entry.artifact.reference)) {
+		throw new Error('OCI submission requires a SHA-256-pinned reference');
 	}
 	const token = await oidcToken(registryOrigin, environ, provider, http);
-	const response = await requestJSON(
-		`${registryOrigin}/v1/submissions`,
-		token,
-		{
+	const body: Record<string, unknown> = 'asset' in entry
+		? {
 			schema_version: 1,
 			provider,
 			repository,
@@ -408,7 +454,19 @@ export async function submit(
 			asset: entry.asset,
 			sha256: entry.sha256,
 			kind: entry.kind,
-		},
+		}
+		: {
+			schema_version: 2,
+			provider,
+			repository,
+			tag: entry.tag,
+			kind: entry.kind,
+			artifact: entry.artifact,
+		};
+	const response = await requestJSON(
+		`${registryOrigin}/v1/submissions`,
+		token,
+		body,
 		'Registry submission',
 		http,
 	);
@@ -529,11 +587,57 @@ export interface PublishOptions {
 	sha256: string;
 	repository: string;
 	tag: string;
-	kind: 'component' | 'core';
+	kind: 'component' | 'core' | 'manifest';
+	allowConfigProcesses: boolean;
 	notesFile: string;
 	candidateReceipt: string;
 	receipt: string;
 	timeoutSeconds: number;
+}
+
+export interface PublishOCIOptions {
+	actionlint: string;
+	fixture: string;
+	candidateReceipt: string;
+	allowConfigProcesses: boolean;
+	reference: string;
+	repository: string;
+	tag: string;
+	kind: 'core' | 'component' | 'manifest';
+	receipt: string;
+	timeoutSeconds: number;
+}
+
+export async function publishOCI(options: PublishOCIOptions): Promise<void> {
+	if (!Number.isInteger(options.timeoutSeconds) || options.timeoutSeconds < 1 || options.timeoutSeconds > 7200) {
+		throw new Error('Timeout must be between 1 and 7200 seconds');
+	}
+	const entry: Submission = {
+		schema_version: 2,
+		repository: options.repository,
+		tag: options.tag,
+		kind: options.kind,
+		artifact: { type: 'oci', reference: options.reference },
+	};
+	if (options.kind === 'manifest' && !options.allowConfigProcesses) {
+		throw new Error('Process publication requires explicit --allow-config-processes consent');
+	}
+	if (!validOCIReference(options.reference)) {
+		throw new Error('OCI submission requires a SHA-256-pinned reference');
+	}
+	await verifyCandidateReceipt(options.candidateReceipt, entry, options.actionlint, options.fixture);
+	if (
+		process.env.GITHUB_ACTIONS === 'true'
+		&& (process.env.GITHUB_REF !== `refs/tags/${options.tag}`
+			|| process.env.GITHUB_REPOSITORY?.toLowerCase() !== options.repository.toLowerCase())
+	) throw new Error('Publication must run for this repository and release tag');
+	const identifier = await submit(entry, process.env);
+	const sha256 = submissionDigest(entry);
+	if (process.env.GITHUB_OUTPUT) {
+		await appendFile(process.env.GITHUB_OUTPUT, `submission-id=${identifier}\nsha256=${sha256}\n`);
+	}
+	await waitForPublication(identifier, sha256, options.receipt, { timeoutMs: options.timeoutSeconds * 1000 });
+	if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, 'submission-status=published\n');
 }
 
 export async function publishPackage(options: PublishOptions): Promise<void> {
@@ -541,6 +645,7 @@ export async function publishPackage(options: PublishOptions): Promise<void> {
 		options.directory,
 		options.asset,
 		options.sha256,
+		options.kind,
 	);
 	if (
 		!Number.isInteger(options.timeoutSeconds)
@@ -552,13 +657,24 @@ export async function publishPackage(options: PublishOptions): Promise<void> {
 	const notes = options.notesFile
 		? await readFile(options.notesFile, 'utf8')
 		: '';
-	const entry: Submission = {
-		repository: options.repository,
-		tag: options.tag,
-		asset: pkg.asset,
-		sha256: pkg.sha256,
-		kind: options.kind,
-	};
+	const entry: Submission = options.kind === 'manifest'
+		? {
+			schema_version: 2,
+			repository: options.repository,
+			tag: options.tag,
+			kind: 'manifest',
+			artifact: { type: 'release-asset', name: pkg.asset, sha256: pkg.sha256 },
+		}
+		: {
+			repository: options.repository,
+			tag: options.tag,
+			asset: pkg.asset,
+			sha256: pkg.sha256,
+			kind: options.kind,
+		};
+	if (options.kind === 'manifest' && !options.allowConfigProcesses) {
+		throw new Error('Process publication requires explicit --allow-config-processes consent');
+	}
 	await verifyCandidateReceipt(options.candidateReceipt, entry, options.actionlint, options.fixture);
 	if (
 		process.env.GITHUB_ACTIONS === 'true'
@@ -580,10 +696,10 @@ export async function publishPackage(options: PublishOptions): Promise<void> {
 	if (process.env.GITHUB_OUTPUT) {
 		await appendFile(
 			process.env.GITHUB_OUTPUT,
-			`submission-id=${identifier}\nsha256=${pkg.sha256}\n`,
+			`submission-id=${identifier}\nsha256=${submissionDigest(entry)}\n`,
 		);
 	}
-	await waitForPublication(identifier, pkg.sha256, options.receipt, {
+	await waitForPublication(identifier, submissionDigest(entry), options.receipt, {
 		timeoutMs: options.timeoutSeconds * 1000,
 	});
 	if (process.env.GITHUB_OUTPUT) {

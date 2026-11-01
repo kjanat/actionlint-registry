@@ -1,24 +1,27 @@
 name: Publish actionlint plugin
-description: Verify and upload tested package bytes, submit with OIDC, and wait for registry publication.
+description: Publish a Wasm or process release asset, or submit a pinned OCI source, then wait for registry admission.
 inputs:
   directory:
     description: Directory containing the candidate package and SHA256SUMS.
     default: artifacts
   asset:
-    description: Wasm filename within the package.
+    description: Wasm or process manifest filename within the package.
     default: plugin.wasm
   sha256:
-    description: SHA-256 from the successful candidate check.
-    required: true
+    description: SHA-256 of the packaged release asset.
+    default: ""
+  oci:
+    description: Existing OCI image reference pinned by @sha256. No release upload occurs.
+    default: ""
   candidate-receipt:
-    description: Successful shared candidate check receipt for these exact package bytes.
-    required: true
+    description: Successful candidate check receipt for the exact release asset or OCI root.
+    default: ""
   actionlint:
     description: Host executable used by the candidate check.
-    required: true
+    default: ""
   fixture:
     description: Behavioral fixture used by the candidate check.
-    required: true
+    default: ""
   repository:
     description: Public repository containing the release tag.
     default: ${{ github.repository }}
@@ -26,8 +29,11 @@ inputs:
     description: Existing release tag matching the calling workflow's OIDC identity.
     default: ${{ github.ref_name }}
   kind:
-    description: Plugin format, core or component.
+    description: Execution kind, core, component, or manifest.
     default: component
+  allow-config-processes:
+    description: Explicit consent to run native process plugins in fixture checks.
+    default: "false"
   notes-file:
     description: Optional UTF-8 release notes file.
     default: ""
@@ -48,7 +54,7 @@ outputs:
     description: Published after admission and catalogue delivery succeed.
     value: ${{ steps.publish.outputs.submission-status }}
   sha256:
-    description: Verified Wasm digest.
+    description: Canonical artifact digest; release asset bytes or OCI root digest.
     value: ${{ steps.publish.outputs.sha256 }}
 runs:
   using: composite
@@ -70,12 +76,14 @@ runs:
         PACKAGE_DIRECTORY: ${{ inputs.directory }}
         PLUGIN_ASSET: ${{ inputs.asset }}
         PLUGIN_SHA256: ${{ inputs.sha256 }}
+        PLUGIN_OCI: ${{ inputs.oci }}
         CANDIDATE_RECEIPT: ${{ inputs.candidate-receipt }}
         ACTIONLINT: ${{ inputs.actionlint }}
         FIXTURE: ${{ inputs.fixture }}
         PLUGIN_REPOSITORY: ${{ inputs.repository }}
         PLUGIN_TAG: ${{ inputs.tag }}
         PLUGIN_KIND: ${{ inputs.kind }}
+        ALLOW_CONFIG_PROCESSES: ${{ inputs.allow-config-processes }}
         NOTES_FILE: ${{ inputs.notes-file }}
         RECEIPT: ${{ inputs.receipt }}
         TIMEOUT: ${{ inputs.timeout-seconds }}
@@ -83,12 +91,21 @@ runs:
       run: |
         args=()
         if [[ -n "$NOTES_FILE" ]]; then args+=(--notes-file "$NOTES_FILE"); fi
-        bun "$ACTION_PATH/../scripts/cli.ts" publish \
-          --directory "$PACKAGE_DIRECTORY" --asset "$PLUGIN_ASSET" --sha256 "$PLUGIN_SHA256" \
-          --candidate-receipt "$CANDIDATE_RECEIPT" \
-          --actionlint "$ACTIONLINT" --fixture "$FIXTURE" \
-          --repository "$PLUGIN_REPOSITORY" --tag "$PLUGIN_TAG" --kind "$PLUGIN_KIND" \
-          --receipt "$RECEIPT" --timeout-seconds "$TIMEOUT" "${args[@]}"
+        if [[ "$ALLOW_CONFIG_PROCESSES" == "true" ]]; then args+=(--allow-config-processes); fi
+        if [[ -n "$PLUGIN_OCI" ]]; then
+          bun "$ACTION_PATH/../scripts/cli.ts" publish --oci "$PLUGIN_OCI" \
+            --candidate-receipt "$CANDIDATE_RECEIPT" \
+            --actionlint "$ACTIONLINT" --fixture "$FIXTURE" \
+            --repository "$PLUGIN_REPOSITORY" --tag "$PLUGIN_TAG" --kind "$PLUGIN_KIND" \
+            --receipt "$RECEIPT" --timeout-seconds "$TIMEOUT" "${args[@]}"
+        else
+          bun "$ACTION_PATH/../scripts/cli.ts" publish \
+            --directory "$PACKAGE_DIRECTORY" --asset "$PLUGIN_ASSET" --sha256 "$PLUGIN_SHA256" \
+            --candidate-receipt "$CANDIDATE_RECEIPT" \
+            --actionlint "$ACTIONLINT" --fixture "$FIXTURE" \
+            --repository "$PLUGIN_REPOSITORY" --tag "$PLUGIN_TAG" --kind "$PLUGIN_KIND" \
+            --receipt "$RECEIPT" --timeout-seconds "$TIMEOUT" "${args[@]}"
+        fi
     - name: Verify published installation and offline behavior
       shell: bash
       env:
@@ -97,6 +114,10 @@ runs:
         FIXTURE: ${{ inputs.fixture }}
         CANDIDATE_RECEIPT: ${{ inputs.candidate-receipt }}
         RELEASE_TAG: ${{ inputs.tag }}
-      run: bash "$ACTION_PATH/../scripts/validate.sh" bun "$ACTION_PATH/../scripts/cli.ts" verify-installation
-        --actionlint "$ACTIONLINT" --fixture "$FIXTURE"
-        --receipt "$CANDIDATE_RECEIPT" --tag "$RELEASE_TAG" --report installation.json
+        ALLOW_CONFIG_PROCESSES: ${{ inputs.allow-config-processes }}
+      run: |
+        consent=()
+        if [[ "$ALLOW_CONFIG_PROCESSES" == "true" ]]; then consent+=(--allow-config-processes); fi
+        bash "$ACTION_PATH/../scripts/validate.sh" bun "$ACTION_PATH/../scripts/cli.ts" verify-installation \
+          --actionlint "$ACTIONLINT" --fixture "$FIXTURE" \
+          --receipt "$CANDIDATE_RECEIPT" --tag "$RELEASE_TAG" --report installation.json "${consent[@]}"

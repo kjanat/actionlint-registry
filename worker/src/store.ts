@@ -1,5 +1,5 @@
 import type { Authorization, Identity, Receipt, Submission } from '#model';
-import { HttpError, object, text } from '#model';
+import { HttpError, object, sourceIdentity, text } from '#model';
 
 type Binding = string | number | null;
 export interface Database {
@@ -106,7 +106,7 @@ export class InboxStore {
 				auth.identity.issuer,
 				auth.identity.repository_id,
 				s.tag,
-				s.asset,
+				sourceIdentity(s),
 			]);
 			const token = JSON.stringify([auth.identity.issuer, auth.jti]);
 			const replay = this.db.query(

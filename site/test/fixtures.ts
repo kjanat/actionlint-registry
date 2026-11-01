@@ -13,9 +13,14 @@ export interface VersionFixture {
 	reason?: string;
 	replacement?: string;
 	metadata?: Record<string, unknown>;
+	source?: { type: 'release-asset'; name: string } | { type: 'oci'; reference: string };
 }
 export interface PluginFixture {
 	name: string;
+	repository?: string;
+	repositoryID?: number;
+	pluginID?: string;
+	identityVersion?: 2;
 	aliases?: string[];
 	versions: VersionFixture[];
 }
@@ -40,44 +45,69 @@ export async function createExport(plugins: PluginFixture[]): Promise<string> {
 	const statuses = [];
 	for (const [index, plugin] of plugins.entries()) {
 		const key = (index + 1).toString(16).padStart(64, '0');
-		const repository = `publisher/plugin-${index + 1}`;
-		const name = `github.com/${repository}`;
+		const repository = plugin.repository ?? `publisher/plugin-${index + 1}`;
+		const repositoryID = plugin.repositoryID ?? index + 1;
+		const pluginID = plugin.pluginID ?? `plugin-${index + 1}`;
+		const name = plugin.identityVersion === 2 ? pluginID.toLowerCase() : `github.com/${repository}`;
 		const manifest = `plugins/${key}/index.json`;
-		catalogue.push({ name, plugin_id: `plugin-${index + 1}`, manifest, aliases: plugin.aliases ?? [] });
+		catalogue.push({ name, plugin_id: pluginID, manifest, aliases: plugin.aliases ?? [] });
 		const versions = [];
 		for (const [versionIndex, version] of plugin.versions.entries()) {
 			const hash = (versionIndex + 1).toString(16).padStart(64, '0');
-			const sha256 = version.sha256 ?? (index * 100 + versionIndex + 1).toString(16).padStart(64, 'a');
+			const sourceDigest = version.source?.type === 'oci'
+				? /@sha256:([a-f0-9]{64})$/u.exec(version.source.reference)?.[1]
+				: undefined;
+			const sha256 = sourceDigest ?? version.sha256 ?? (index * 100 + versionIndex + 1).toString(16).padStart(64, 'a');
 			const record = `versions/${hash}.json`;
-			const asset_id = index * 100 + versionIndex + 1;
+			const asset_id = version.source?.type === 'oci' ? 0 : index * 100 + versionIndex + 1;
 			versions.push({ version: version.version, record, compatibility: [] });
 			await write(`plugins/${key}/${record}`, {
 				record_version: 2,
-				submission: {
-					provider: 'github',
-					repository,
-					tag: version.version,
-					asset: 'plugin.wasm',
-					sha256,
-					kind: 'component',
-				},
-				repository_id: index + 1,
+				...(plugin.identityVersion === 2 ? { identity_version: 2 } : {}),
+				submission: version.source
+					? {
+						schema_version: 2,
+						provider: 'github',
+						repository,
+						tag: version.version,
+						kind: version.source.type === 'oci' ? 'component' : 'manifest',
+						artifact: version.source.type === 'oci'
+							? version.source
+							: { ...version.source, sha256 },
+					}
+					: {
+						schema_version: 1,
+						provider: 'github',
+						repository,
+						tag: version.version,
+						asset: 'plugin.wasm',
+						sha256,
+						kind: 'component',
+					},
+				repository_id: repositoryID,
 				asset_id,
-				url: `https://github.com/${repository}/releases/download/${version.version}/plugin.wasm`,
+				url: version.source?.type === 'oci'
+					? version.source.reference
+					: `https://github.com/${repository}/releases/download/${version.version}/${
+						version.source?.type === 'release-asset' ? version.source.name : 'plugin.wasm'
+					}`,
 				published_at: version.publishedAt,
 				artifact: {
+					plugin_id: pluginID,
 					metadata: version.metadata
 						?? { name: plugin.name, description: `${plugin.name} description`, license: 'MIT' },
 				},
 			});
-			downloads.push({
-				provider: 'github',
-				repository_id: index + 1,
-				version: version.version,
-				asset_id,
-				sha256,
-				...(version.count === null ? { status: 'unavailable' } : { status: 'available', count: version.count }),
-			});
+			if (version.source?.type !== 'oci') {
+				downloads.push({
+					provider: 'github',
+					repository_id: repositoryID,
+					version: version.version,
+					asset_id,
+					sha256,
+					...(version.count === null ? { status: 'unavailable' } : { status: 'available', count: version.count }),
+				});
+			}
 			if (version.state) {
 				statuses.push({
 					name,
@@ -90,7 +120,13 @@ export async function createExport(plugins: PluginFixture[]): Promise<string> {
 			}
 		}
 		await write(manifest, {
-			plugin: { provider: 'github', repository, repository_id: String(index + 1), plugin_id: `plugin-${index + 1}` },
+			plugin: {
+				schema_version: plugin.identityVersion ?? 1,
+				provider: 'github',
+				repository,
+				repository_id: String(repositoryID),
+				plugin_id: pluginID,
+			},
 			versions,
 		});
 	}
