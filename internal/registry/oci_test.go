@@ -356,6 +356,43 @@ func (p ociReleaseProvider) DownloadRelease(context.Context, Submission, Release
 	return errors.New("OCI must not download a release asset")
 }
 
+func TestOCISharedRepositoryKeepsPackageVersionsImmutable(t *testing.T) {
+	index := EmptyIndex()
+	admit := func(id, command string) (Entry, error) {
+		body := bytes.ReplaceAll(processBody(), []byte(`"id":"example"`), []byte(`"id":"`+id+`"`))
+		body = bytes.Replace(body, []byte(`"entry":"example"`), []byte(`"entry":"`+command+`"`), 1)
+		inspector, reference, _ := ociFixture(t, body)
+		distribution, err := OCIReference(reference)
+		if err != nil {
+			return Entry{}, err
+		}
+		receipt := sampleReceipt()
+		receipt.Submission = Submission{SchemaVersion: 2, Provider: "github", Repository: "publisher/plugin", Tag: "v1.0.0", Kind: "manifest", Artifact: distribution}
+		entry := acceptedFixture(t)
+		entry.Submission = receipt.Submission
+		entry.ReleaseID, entry.AssetID = 0, 0
+		entry.UpstreamImmutable = false
+		entry.URL = reference
+		service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Inspect}
+		return service.Admit(t.Context(), &index, receipt)
+	}
+	const firstID = "github.com/publisher/plugin/tools/first"
+	first, err := admit(firstID, "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := admit("github.com/publisher/plugin/tools/second", "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.IdentityVersion != 2 || second.IdentityVersion != 2 || first.URL == second.URL || strings.Split(first.URL, "@sha256:")[0] != strings.Split(second.URL, "@sha256:")[0] || len(index.Entries) != 2 {
+		t.Fatal("sibling OCI packages did not share a repository and tag", index)
+	}
+	if _, err := admit(firstID, "replacement"); err == nil || FailureDisposition(err) != "rejected" || !strings.Contains(err.Error(), "immutable") || len(index.Entries) != 2 {
+		t.Fatalf("accepted a replacement for an inspected package version: %v", err)
+	}
+}
+
 func TestOCIAdmissionIdentityAndImmutability(t *testing.T) {
 	inspector, reference, _ := ociFixture(t, processBody())
 	distribution, err := OCIReference(reference)

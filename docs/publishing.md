@@ -211,6 +211,11 @@ For a release workflow that already uploaded the manifest, the smaller root acti
 submits it with `contents: read` and `id-token: write`; it does not run a candidate
 fixture.
 
+Different plugin IDs can share an OCI repository and authenticated Git tag when
+their artifacts have distinct root digests. Each pinned root has its own submission;
+admission binds the inspected plugin ID and version to the accepted artifact and
+rejects replacement bytes. Identical retries retain their original receipt.
+
 For a public digest-pinned OCI image, use `oci` instead of `artifact` for the
 candidate check. Pass that receipt and the same host and fixture to `publish`.
 The action does not upload an image or create a release asset. The authenticated
