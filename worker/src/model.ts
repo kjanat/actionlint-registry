@@ -96,7 +96,9 @@ export function sourceIdentity(value: Submission): string {
 	if (value.artifact.type === 'release-asset') {
 		return value.artifact.name;
 	}
-	return JSON.stringify({ type: value.artifact.type, name: value.artifact.reference.split('@sha256:')[0] });
+	// A repository can hold multiple packages. Their immutable root references
+	// identify separate candidates; admission binds inspected plugin IDs/versions.
+	return JSON.stringify({ type: value.artifact.type, name: value.artifact.reference });
 }
 
 export function sourceDigest(value: Submission): string {

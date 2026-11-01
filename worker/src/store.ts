@@ -1,5 +1,5 @@
 import type { Authorization, Identity, Receipt, Submission } from '#model';
-import { HttpError, object, sourceIdentity, text } from '#model';
+import { HttpError, object, sourceIdentity, submission, text } from '#model';
 
 type Binding = string | number | null;
 export interface Database {
@@ -36,6 +36,9 @@ function count(value: unknown): number {
 	const n = row(value).n;
 	if (typeof n !== 'number') throw new Error('The database returned an invalid count.');
 	return n;
+}
+function versionKey(identity: Identity, tag: string, source: string): string {
+	return JSON.stringify([identity.issuer, identity.repository_id, tag, source]);
 }
 interface SubmissionStatus {
 	id: string;
@@ -102,12 +105,7 @@ export class InboxStore {
 				auth.identity.issuer,
 				auth.identity.repository_id,
 			]);
-			const version = JSON.stringify([
-				auth.identity.issuer,
-				auth.identity.repository_id,
-				s.tag,
-				sourceIdentity(s),
-			]);
+			const version = versionKey(auth.identity, s.tag, sourceIdentity(s));
 			const token = JSON.stringify([auth.identity.issuer, auth.jti]);
 			const replay = this.db.query(
 				'SELECT body_hash, submission_id FROM replay WHERE token_key = ?',
@@ -142,7 +140,7 @@ export class InboxStore {
 			const previous = this.db.query(
 				'SELECT id, status, body_hash, lease_owner FROM submissions WHERE version_key = ?',
 				version,
-			)[0];
+			)[0] ?? this.legacyOCI(s, auth.identity);
 			if (previous !== undefined) {
 				const prior = row(previous);
 				if (prior.body_hash !== hash) {
@@ -234,6 +232,26 @@ export class InboxStore {
 			);
 			return { id, status: 'pending' };
 		});
+	}
+
+	private legacyOCI(s: Submission, identity: Identity): Record<string, unknown> | undefined {
+		if (s.schema_version !== 2 || s.artifact.type !== 'oci') return;
+		// Earlier workers keyed OCI by repository. Reuse an identical root's
+		// receipt and lease, while leaving different roots as separate candidates.
+		const source = JSON.stringify({ type: 'oci', name: s.artifact.reference.split('@sha256:')[0] });
+		const value = this.db.query(
+			'SELECT id, status, body_hash, lease_owner, receipt FROM submissions WHERE version_key = ?',
+			versionKey(identity, s.tag, source),
+		)[0];
+		if (value === undefined) return;
+		const previous = row(value);
+		const stored = submission(object(JSON.parse(text(previous.receipt, 32 << 10))).submission);
+		if (
+			stored.schema_version === 2 && stored.artifact.type === 'oci'
+			&& stored.artifact.reference === s.artifact.reference
+		) {
+			return previous;
+		}
 	}
 
 	private checkPendingQuota(publisher: string): void {

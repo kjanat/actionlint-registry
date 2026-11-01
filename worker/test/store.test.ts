@@ -103,21 +103,68 @@ test('legacy release keys retain submission identity and leases after source-uni
 	expect(db.query('SELECT count(*) AS n FROM submissions').get()).toEqual({ n: 1 });
 });
 
-test('OCI digest changes cannot replace an accepted publisher reference and tag', async () => {
-	const inbox = store();
-	const make = (digestValue: string) =>
-		submission({
-			schema_version: 2,
-			provider: 'github',
-			repository: 'acme/plugin',
-			tag: 'v2',
-			kind: 'component',
-			artifact: { type: 'oci', reference: `oci://ghcr.io/acme/plugin@sha256:${digestValue}` },
-		});
-	inbox.submit(make('a'.repeat(64)), auth, 'first', 100);
-	expect(() => inbox.submit(make('b'.repeat(64)), { ...auth, jti: 'new-token' }, 'second', 101)).toThrow(
+function ociSubmission(value: string) {
+	return submission({
+		schema_version: 2,
+		provider: 'github',
+		repository: s.repository,
+		tag: s.tag,
+		kind: 'manifest',
+		artifact: { type: 'oci', reference: `oci://ghcr.io/acme/plugin@sha256:${value}` },
+	});
+}
+
+test('distinct OCI roots in one repository and tag queue separately; retries keep each identity', async () => {
+	const db = new Database(':memory:');
+	const inbox = store(db);
+	const first = ociSubmission('a'.repeat(64));
+	const second = ociSubmission('b'.repeat(64));
+	const firstHash = await digest(JSON.stringify(first));
+	const secondHash = await digest(JSON.stringify(second));
+	const accepted = inbox.submit(first, auth, firstHash, 100);
+	const sibling = inbox.submit(second, { ...auth, jti: 'second' }, secondHash, 101);
+	expect(sibling.id).not.toBe(accepted.id);
+	expect(inbox.submit(first, { ...auth, jti: 'retry-first' }, firstHash, 102).id).toBe(accepted.id);
+	expect(inbox.submit(second, { ...auth, jti: 'retry-second' }, secondHash, 103).id).toBe(sibling.id);
+	expect(() => inbox.submit(second, auth, secondHash, 104)).toThrow('OIDC token has already been used');
+	const changed = submission({ ...first, kind: 'component' });
+	expect(() => inbox.submit(changed, { ...auth, jti: 'changed-kind' }, 'changed', 105)).toThrow(
 		'version is already bound',
 	);
+	expect(db.query('SELECT count(*) AS n FROM submissions').get()).toEqual({ n: 2 });
+});
+
+test('legacy OCI repository keys retain leases without blocking sibling root digests', async () => {
+	const db = new Database(':memory:');
+	const inbox = store(db);
+	const first = ociSubmission('a'.repeat(64));
+	const hash = await digest(JSON.stringify(first));
+	const accepted = inbox.submit(first, auth, hash, 100);
+	const claim = inbox.claim(identity, 101).claim;
+	if (claim === null) throw new Error('missing legacy OCI claim');
+	db.query('UPDATE submissions SET version_key=? WHERE id=?').run(
+		JSON.stringify([
+			identity.issuer,
+			identity.repository_id,
+			first.tag,
+			JSON.stringify({ type: 'oci', name: 'oci://ghcr.io/acme/plugin' }),
+		]),
+		accepted.id,
+	);
+	expect(inbox.submit(first, { ...auth, jti: 'retry' }, hash, 102)).toEqual({
+		id: accepted.id,
+		status: 'validating',
+		validator_run: 'https://github.com/acme/plugin/actions/runs/30/attempts/1',
+	});
+	const second = ociSubmission('b'.repeat(64));
+	const sibling = inbox.submit(second, { ...auth, jti: 'sibling' }, await digest(JSON.stringify(second)), 103);
+	expect(sibling.id).not.toBe(accepted.id);
+	expect(() =>
+		inbox.submit(submission({ ...first, kind: 'component' }), { ...auth, jti: 'changed-kind' }, 'changed', 104)
+	)
+		.toThrow('version is already bound');
+	expect(inbox.complete(accepted.id, identity, claim.lease_id, 'published', undefined, 105).status).toBe('published');
+	expect(db.query('SELECT count(*) AS n FROM submissions').get()).toEqual({ n: 2 });
 });
 
 test('claims have owner/run-specific leases; completion is idempotent', () => {
