@@ -1,21 +1,21 @@
 name: Submit actionlint plugin
-description: Submit a release using GitHub OIDC. The calling job requires id-token write permission.
+description: Submit a release asset or pinned OCI source using GitHub OIDC. Requires id-token write permission.
 branding: { icon: package, color: blue }
 inputs:
   repository:
-    description: Specify the public repository containing the immutable release, using owner/repository.
+    description: Specify the public repository authorizing this source, using owner/repository.
     default: ${{ github.repository }}
   tag:
-    description: Specify the exact release tag. It must match the tag in the OIDC token.
+    description: Specify the exact tag. It must match the tag in the OIDC token.
     default: ${{ github.ref_name }}
   asset:
-    description: Specify the exact filename of the WASM asset attached to the release.
-    required: true
+    description: Specify the exact WASM or process manifest filename attached to the release.
   sha256:
     description: Provide the SHA-256 checksum of the release asset.
-    required: true
+  oci:
+    description: Submit an existing OCI image by a digest-pinned oci:// reference.
   kind:
-    description: Set the plugin format to core or component.
+    description: Set the execution kind to core, component, or manifest.
     required: true
 outputs:
   submission-id:
@@ -46,5 +46,6 @@ runs:
         PLUGIN_TAG: ${{ inputs.tag }}
         PLUGIN_ASSET: ${{ inputs.asset }}
         PLUGIN_SHA256: ${{ inputs.sha256 }}
+        PLUGIN_OCI: ${{ inputs.oci }}
         PLUGIN_KIND: ${{ inputs.kind }}
       run: bun "$ACTION_PATH/scripts/cli.ts" submit

@@ -81,20 +81,24 @@ the receipt and package, uploads the same bytes, waits for registry admission an
 checks delivery with the same fixture. Keep build and plugin-specific assertions
 in the plugin repository; the registry owns upload, submission and recovery tooling.
 
-Publish a tagged release with an embedded `actionlint.plugin` custom section.
-The [metadata policy](docs/metadata.md) describes both supported WASM formats.
-Submit the SHA-256 checksum of the file you distribute. For `.wasm.gz` files,
-calculate the checksum of the compressed file.
+For Wasm, publish a tagged release with an embedded `actionlint.plugin` custom
+section. Process plugins instead publish a JSON manifest. The
+[metadata policy](docs/metadata.md) describes both source formats and the two Wasm
+execution formats.
+Submit the SHA-256 checksum of the file you distribute. For compressed assets,
+calculate the checksum of the compressed bytes. A release asset can be a Wasm
+module or process manifest; a public OCI source must use a digest-pinned reference.
 The Worker records the CI provider, project ID, and tag from the authenticated
 request. The admission service then checks the project's identity and the commit referenced
 by the tag against the hosting provider's API.
 
 ### GitHub Actions
 
-The shared publish action requires `contents: write` and `id-token: write` in a job
-running on the release tag. Enable immutable releases in the repository first.
-Its [inputs and workflow requirements](docs/publishing.md#github-actions) cover candidate
-receipts, package directories and host/fixture selection.
+The shared publish action needs `id-token: write` in a job running on the release
+tag. Release asset upload also needs `contents: write`; OCI submission does not
+upload an image or release asset. Enable immutable releases for GitHub release
+assets. Its [inputs and workflow requirements](docs/publishing.md#github-actions)
+cover candidate receipts, package directories and host/fixture selection.
 
 If another workflow already publishes the release, the root action submits that
 existing release using only `contents: read` and `id-token: write`:
@@ -122,6 +126,15 @@ Replace the example checksum with the checksum produced by your release job.
 The action uses the current repository and tag unless you supply them explicitly.
 You do not need a personal access token or write access to the registry repository.
 The action returns the request identifier through its `submission-id` output.
+
+Process manifests use `kind: manifest` and a `.json` or `.json.gz` release asset.
+The registry validates metadata but does not run the native process. Candidate
+fixture checks require explicit `allow-config-processes: true` consent because
+native execution has host privileges. Registry compatibility remains unsupported
+for the process transport. For OCI, pass `oci:` with an
+`oci://...@sha256:<digest>` reference and the declared kind; this submits the
+existing image without uploading a release asset. See
+[publishing details](docs/publishing.md#process-manifests-and-oci-sources).
 
 ### GitLab.com
 
@@ -250,8 +263,9 @@ actionlint --plugin 'https://publisher.example/plugin.wasm#sha256=...'
 ```
 
 Actionlint can install declared registry plugins with `actionlint plugin install`;
-its adjacent lock pins the accepted artifact. Disable a conflicting built-in
-analyzer when replacing it, for example `--shellcheck=`. [Schemas](schemas/) describe
+configuration records the exact version and local candidates also bind a digest.
+Verified registry selections and artifact bytes live in the user cache. Disable a
+conflicting tool when replacing it, for example `--no-tool=shellcheck`. [Schemas](schemas/) describe
 submission, receipt, plugin, version and catalogue data.
 
 [Release status](docs/release-status.md) defines deprecation, withdrawal and

@@ -6,6 +6,45 @@ import { downloadsSchema } from '#schema.ts';
 import { createExport, fixture } from '#test/fixtures.ts';
 
 describe('public registry JSON projection', () => {
+	test('monorepo packages keep their selectors and release statuses distinct', async () => {
+		const version = { version: 'v1.0.0', publishedAt: '2026-01-01T00:00:00Z', count: 2 };
+		const directory = await createExport([{
+			name: 'Grant',
+			repository: 'publisher/monorepo',
+			repositoryID: 42,
+			pluginID: 'github.com/publisher/monorepo/plugins/grant',
+			identityVersion: 2,
+			versions: [{ ...version, state: 'withdrawn', reason: 'Package-specific withdrawal' }],
+		}, {
+			name: 'Syft',
+			repository: 'publisher/monorepo',
+			repositoryID: 42,
+			pluginID: 'github.com/publisher/monorepo/plugins/syft',
+			identityVersion: 2,
+			versions: [version],
+		}]);
+		const data = await loadCatalogue(directory);
+		expect(data.plugins.map(plugin => plugin.repositoryURL)).toEqual([
+			'https://github.com/publisher/monorepo',
+			'https://github.com/publisher/monorepo',
+		]);
+		expect(data.plugins.map(plugin => plugin.releases[0]?.reference)).toEqual([
+			'github.com/publisher/monorepo/plugins/grant@v1.0.0',
+			'github.com/publisher/monorepo/plugins/syft@v1.0.0',
+		]);
+		expect(data.plugins.map(plugin => plugin.releases[0]?.state)).toEqual(['withdrawn', 'active']);
+	});
+
+	test('package selectors cannot claim a different publishing repository', async () => {
+		const directory = await createExport([{
+			...fixture('Forged package'),
+			repository: 'publisher/monorepo',
+			pluginID: 'github.com/other/repository/plugins/check',
+			identityVersion: 2,
+		}]);
+		await expect(loadCatalogue(directory)).rejects.toThrow('outside its publishing repository');
+	});
+
 	test('groups versions and follows newest publication, even when its version sorts earlier', async () => {
 		const directory = await createExport([{
 			name: 'Plugin',
@@ -119,5 +158,33 @@ describe('public registry JSON projection', () => {
 			'revoked',
 		], ['curated@v1', 'revoked']]);
 		expect(data.plugins[1]?.releases[0]?.reference).toBe('github.com/publisher/plugin-2@v1.0.0');
+	});
+
+	test('projects manifest assets and OCI sources without inventing OCI downloads', async () => {
+		const reference = `oci://ghcr.io:5443/publisher/plugin@sha256:${'c'.repeat(64)}`;
+		const directory = await createExport([{
+			name: 'Sources',
+			versions: [
+				{
+					version: 'manifest',
+					publishedAt: '2026-01-01T00:00:00Z',
+					count: 1,
+					source: { type: 'release-asset', name: 'plugin.json.gz' },
+				},
+				{ version: 'oci', publishedAt: '2026-01-02T00:00:00Z', count: 50, source: { type: 'oci', reference } },
+			],
+		}]);
+		const releases = (await loadCatalogue(directory)).plugins[0]?.releases;
+		expect(releases?.[0]).toMatchObject({
+			kind: 'component',
+			source: { type: 'oci', reference },
+			pinnedURL: reference,
+			sha256: 'c'.repeat(64),
+			downloads: { state: 'unsupported' },
+		});
+		expect(releases?.[1]).toMatchObject({
+			kind: 'manifest',
+			source: { type: 'release-asset', name: 'plugin.json.gz' },
+		});
 	});
 });

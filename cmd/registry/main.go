@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,7 +34,8 @@ func run(ctx context.Context, args []string) error {
 	storePath := flags.String("store", "registry/plugins", "Read or write accepted plugin records in this directory.")
 	receiptPath := flags.String("receipt", "", "Read the JSON receipt obtained from an authenticated Worker claim.")
 	reportPath := flags.String("report", "", "Write a JSON report to this file.")
-	artifactPath := flags.String("artifact", "", "Inspect this local WASM file or check it with an adapter.")
+	artifactPath := flags.String("artifact", "", "Inspect a local WASM/process package or pinned OCI reference; check local packages with an adapter.")
+	ociLayout := flags.String("oci-layout", "", "Read the pinned OCI artifact from this local image layout instead of a public registry.")
 	candidatePath := flags.String("candidate", "", "Write an admission delta here, or merge validated records from this directory.")
 	outputPath := flags.String("output", "dist", "Write the generated catalogue to this directory.")
 	aliasesPath := flags.String("aliases", "registry/aliases.json", "Read registry-maintained alias assignments for catalogue export.")
@@ -54,11 +56,20 @@ func run(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return errors.New("this command does not accept positional arguments")
 	}
+	if *ociLayout != "" && args[0] != "inspect" && args[0] != "candidate" {
+		return errors.New("--oci-layout is available only for inspect and candidate")
+	}
 	if args[0] == "inspect" {
 		if *artifactPath == "" {
 			return errors.New("inspect requires --artifact")
 		}
-		declaration, err := artifact.Inspect(ctx, *artifactPath)
+		var declaration artifact.Declaration
+		var err error
+		if *ociLayout != "" {
+			declaration, err = registry.InspectLayout(ctx, *artifactPath, *ociLayout)
+		} else {
+			declaration, err = registry.InspectSource(ctx, *artifactPath)
+		}
 		if err != nil {
 			return err
 		}
@@ -77,7 +88,12 @@ func run(ctx context.Context, args []string) error {
 		if *artifactPath == "" {
 			return errors.New("candidate requires --artifact; --output must name a new directory")
 		}
-		candidate, err := registry.ExportCandidate(ctx, *artifactPath, *outputPath, index)
+		var candidate registry.Candidate
+		if *ociLayout != "" {
+			candidate, err = registry.ExportLayoutCandidate(ctx, *artifactPath, *ociLayout, *outputPath, index)
+		} else {
+			candidate, err = registry.ExportCandidate(ctx, *artifactPath, *outputPath, index)
+		}
 		if err != nil {
 			return err
 		}
@@ -95,12 +111,15 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		status := registry.ReleaseStatus{
-			Name:    entry.Submission.Provider + ".com/" + entry.Submission.Repository,
+			Name:    entry.Name(),
 			Version: *version, SHA256: *sha256, Status: registry.ReleaseState(*state),
 			Reason: *reason, Replacement: *replacement, ChangedAt: time.Now().UTC(), Actor: actor,
 		}
 		return (registry.StatusStore{Directory: *statusPath}).Add(index, status)
 	case "check":
+		if strings.HasPrefix(*artifactPath, "oci://") {
+			return errors.New("OCI graph compatibility checks are unsupported by the local-file checker protocol")
+		}
 		if *checker == "" || *artifactPath == "" || (*pluginID == "") != (*version == "") {
 			return errors.New("check requires --checker and --artifact; add both --plugin and --version to record evidence for an accepted release")
 		}

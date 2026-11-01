@@ -21,7 +21,8 @@
     "kind": {
       "enum": [
         "core",
-        "component"
+        "component",
+        "manifest"
       ]
     },
     "metadata": {

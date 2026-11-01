@@ -46,7 +46,7 @@ func sampleBody() string {
 
 func sampleSubmission() Submission {
 	digest := sha256.Sum256([]byte(sampleBody()))
-	return Submission{1, "github", "publisher/plugin", "v1.0.0", "plugin.wasm", hex.EncodeToString(digest[:]), "core"}
+	return Submission{SchemaVersion: 1, Provider: "github", Repository: "publisher/plugin", Tag: "v1.0.0", Asset: "plugin.wasm", SHA256: hex.EncodeToString(digest[:]), Kind: "core"}
 }
 
 func sampleDeclaration() artifact.Declaration {

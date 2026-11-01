@@ -29,7 +29,7 @@ func (store EvidenceStore) Add(index Index, evidence compatibility.Evidence) err
 	}
 	found := false
 	for _, entry := range index.Entries {
-		if entry.Submission.SHA256 == evidence.Report.ArtifactSHA256 {
+		if entry.Submission.Digest() == evidence.Report.ArtifactSHA256 {
 			found = true
 		}
 	}
@@ -79,7 +79,7 @@ func (store EvidenceStore) Load(index Index) ([]compatibility.Evidence, error) {
 	}
 	accepted := map[string]bool{}
 	for _, entry := range index.Entries {
-		accepted[entry.Submission.SHA256] = true
+		accepted[entry.Submission.Digest()] = true
 	}
 	for _, dir := range dirs {
 		if !dir.IsDir() || !digestPattern.MatchString(dir.Name()) || !accepted[dir.Name()] {

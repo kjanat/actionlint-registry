@@ -2,20 +2,32 @@ name: Check actionlint plugin candidate
 description: Install packaged candidate bytes without a release, exercise plugin fixtures, and check cached execution.
 inputs:
   artifact:
-    description: Packaged Wasm file to inspect and install.
-    default: artifacts/plugin.wasm
+    description: Packaged Wasm file or process manifest (default artifacts/plugin.wasm when oci is absent).
+    default: ""
+  oci:
+    description: Public OCI reference pinned by @sha256; mutually exclusive with artifact.
+    default: ""
+  oci-layout:
+    description: Local ORAS image layout containing the pinned oci root; check before uploading an image.
+    default: ""
   actionlint:
     description: Executable for the supported actionlint revision.
-    required: true
+    default: ""
   fixture:
     description: TypeScript module exporting prepare and verify for the plugin's behavior.
-    required: true
+    default: ""
+  kind:
+    description: Optional execution kind; inferred from the candidate when omitted.
+    default: ""
+  allow-config-processes:
+    description: Explicit consent to run native process plugins in fixture checks.
+    default: "false"
   report:
     description: Destination for the candidate receipt used during publication.
     default: candidate.json
 outputs:
   sha256:
-    description: SHA-256 of the candidate installed and exercised successfully.
+    description: SHA-256 of the tested release asset bytes or OCI root manifest.
     value: ${{ steps.check.outputs.sha256 }}
 runs:
   using: composite
@@ -38,6 +50,10 @@ runs:
       env:
         ACTION_PATH: ${{ github.action_path }}
         ARTIFACT: ${{ inputs.artifact }}
+        OCI: ${{ inputs.oci }}
+        OCI_LAYOUT: ${{ inputs.oci-layout }}
+        KIND: ${{ inputs.kind }}
+        ALLOW_CONFIG_PROCESSES: ${{ inputs.allow-config-processes }}
         ACTIONLINT: ${{ inputs.actionlint }}
         FIXTURE: ${{ inputs.fixture }}
         REPORT: ${{ inputs.report }}
@@ -45,7 +61,13 @@ runs:
         tools="$(mktemp -d)"
         trap 'rm -rf -- "$tools"' EXIT
         go -C "$ACTION_PATH/.." build -o "$tools/registry" ./cmd/registry
+        consent=()
+        if [[ "$ALLOW_CONFIG_PROCESSES" == "true" ]]; then consent+=(--allow-config-processes); fi
+        kind_args=()
+        if [[ -n "$KIND" ]]; then kind_args+=(--kind "$KIND"); fi
+        layout_args=()
+        if [[ -n "$OCI_LAYOUT" ]]; then layout_args+=(--oci-layout "$OCI_LAYOUT"); fi
         bash "$ACTION_PATH/../scripts/validate.sh" bun "$ACTION_PATH/../scripts/cli.ts" check \
           --registry "$tools/registry" --actionlint "$ACTIONLINT" \
-          --artifact "$ARTIFACT" --fixture "$FIXTURE" \
-          --store "$ACTION_PATH/../registry/plugins" --report "$REPORT"
+          --artifact "$ARTIFACT" --oci "$OCI" --fixture "$FIXTURE" \
+          --store "$ACTION_PATH/../registry/plugins" --report "$REPORT" "${kind_args[@]}" "${consent[@]}" "${layout_args[@]}"

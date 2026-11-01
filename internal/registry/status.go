@@ -74,10 +74,10 @@ func StatusFor(entry Entry, statuses []ReleaseStatus) *ReleaseStatus {
 	var selected *ReleaseStatus
 	for i := range statuses {
 		status := &statuses[i]
-		if status.SHA256 == entry.Submission.SHA256 && status.Status == StatusRevoked {
+		if status.SHA256 == entry.Submission.Digest() && status.Status == StatusRevoked {
 			return status
 		}
-		if status.Name == entry.Submission.Provider+".com/"+entry.Submission.Repository && status.Version == entry.Submission.Tag {
+		if status.Name == entry.Name() && status.Version == entry.Submission.Tag {
 			selected = status
 		}
 	}
@@ -95,8 +95,8 @@ func (s ReleaseStatus) validate(index Index) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	name := entry.Submission.Provider + ".com/" + entry.Submission.Repository
-	if s.Name != name || s.SHA256 != entry.Submission.SHA256 {
+	name := entry.Name()
+	if s.Name != name || s.SHA256 != entry.Submission.Digest() {
 		return Entry{}, errors.New("release status disagrees with accepted repository, version or digest")
 	}
 	switch s.Status {
@@ -122,7 +122,7 @@ func (s ReleaseStatus) validate(index Index) (Entry, error) {
 type StatusStore struct{ Directory string }
 
 func statusKey(entry Entry) string {
-	return filepath.Join(entry.Receipt.PluginKey(), key(entry.Submission.Tag))
+	return filepath.Join(entry.PluginKey(), key(entry.Submission.Tag))
 }
 
 // Load verifies the entire audit history. Revocation is terminal for the bytes,

@@ -54,6 +54,13 @@ func Validate(ctx context.Context, path string) (Result, error) {
 	if !stat.Mode().IsRegular() {
 		return Result{}, errors.New("snapshot must be a regular file")
 	}
+	process, err := isProcessManifest(path)
+	if err != nil {
+		return Result{}, err
+	}
+	if process {
+		return Result{}, fmt.Errorf("%w: process/1 requires a process-aware checker; this checker exercises WASM contracts only", ErrUnsupportedContract)
+	}
 	info, err := plugin.Inspect(ctx, path, plugin.ArtifactOptions{MaxBytes: 128 << 20})
 	if err != nil {
 		return Result{}, err

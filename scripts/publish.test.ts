@@ -6,10 +6,83 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { HTTPClient, HTTPError } from '@/scripts/http.ts';
-import { GitHubPublisher, verifyCandidateReceipt, verifyPackage, waitForPublication } from '@/scripts/publish.ts';
+import {
+	GitHubPublisher,
+	publishOCI,
+	verifyCandidateReceipt,
+	verifyPackage,
+	waitForPublication,
+} from '@/scripts/publish.ts';
+import type { Submission } from '@/scripts/publish.ts';
 
 const identifier = '12345678-1234-4234-8234-123456789abc';
 const checksum = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+
+test('OCI publication requires an exact host rehearsal before requesting submission credentials', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'registry-oci-publication-'));
+	const actionlint = join(directory, 'host');
+	const fixture = join(directory, 'fixture.ts');
+	const candidateReceipt = join(directory, 'candidate.json');
+	const digest = checksum('OCI root manifest');
+	const reference = `oci://ghcr.io/owner/repo/plugin@sha256:${digest}`;
+	const entry: Submission = {
+		schema_version: 2,
+		repository: 'owner/repo',
+		tag: 'v1.0.0',
+		kind: 'manifest',
+		artifact: { type: 'oci', reference },
+	};
+	const valid = {
+		schema_version: 1,
+		offline: true,
+		missing_cache_rejected: true,
+		allow_config_processes: true,
+		artifact: {
+			sha256: digest,
+			kind: 'manifest',
+			repository: 'https://github.com/owner/repo',
+			plugin_id: 'github.com/owner/repo/plugin',
+			plugin_version: '1.0.0',
+		},
+		installation: { sha256: digest, name: 'github.com/owner/repo/plugin', version: 'v1.0.0' },
+		host: { sha256: checksum('tested host') },
+		fixture: { sha256: checksum('tested fixture'), checks: ['native execution'] },
+	};
+	const options = {
+		actionlint,
+		fixture,
+		candidateReceipt,
+		allowConfigProcesses: true,
+		reference,
+		repository: entry.repository,
+		tag: entry.tag,
+		kind: entry.kind,
+		receipt: join(directory, 'publication.json'),
+		timeoutSeconds: 1,
+	};
+	try {
+		await writeFile(actionlint, 'tested host');
+		await writeFile(fixture, 'tested fixture');
+		await writeFile(candidateReceipt, JSON.stringify(valid));
+		await verifyCandidateReceipt(candidateReceipt, entry, actionlint, fixture);
+		await assert.rejects(publishOCI({ ...options, allowConfigProcesses: false }), /explicit .*consent/);
+		for (
+			const artifact of [
+				{ ...valid.artifact, sha256: checksum('primary layer') },
+				{ ...valid.artifact, plugin_version: '1.0.1' },
+			]
+		) {
+			await writeFile(candidateReceipt, JSON.stringify({ ...valid, artifact }));
+			await assert.rejects(publishOCI(options), /Candidate receipt/);
+		}
+		await writeFile(candidateReceipt, JSON.stringify(valid));
+		await writeFile(actionlint, 'different host');
+		await assert.rejects(publishOCI(options), /host changed/);
+		await assert.rejects(readFile(options.receipt), /ENOENT/);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
 
 async function fixture() {
 	const directory = await mkdtemp(join(tmpdir(), 'registry-publication-'));
@@ -88,6 +161,21 @@ test('modified sidecars and extra files stop package publication', async () => {
 		);
 	} finally {
 		await sample.cleanup();
+	}
+});
+
+test('process manifest release assets use their distributed-byte checksum', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'registry-manifest-publication-'));
+	const manifest = Buffer.from(JSON.stringify({ schema_version: 1, transport: 'process', metadata: {} }));
+	try {
+		await writeFile(join(directory, 'plugin.json'), manifest);
+		await writeFile(join(directory, 'SHA256SUMS'), `${checksum(manifest)}  plugin.json\n`);
+		const pkg = await verifyPackage(directory, 'plugin.json', checksum(manifest), 'manifest');
+		assert.equal(pkg.asset, 'plugin.json');
+		assert.equal(pkg.sha256, checksum(manifest));
+		await assert.rejects(verifyPackage(directory, 'plugin.json', checksum(manifest)), /Wasm asset filename/);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
 	}
 });
 
@@ -175,6 +263,48 @@ test('candidate receipt must describe the artifact being published and completed
 		);
 	} finally {
 		await sample.cleanup();
+	}
+});
+
+test('process manifest receipt requires recorded native-execution consent', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'registry-process-receipt-'));
+	const host = join(directory, 'host');
+	const fixturePath = join(directory, 'fixture.ts');
+	const receiptPath = join(directory, 'candidate.json');
+	const hostBytes = 'host';
+	const fixtureBytes = 'fixture';
+	const digest = 'a'.repeat(64);
+	const receipt = {
+		schema_version: 1,
+		offline: true,
+		missing_cache_rejected: true,
+		artifact: {
+			sha256: digest,
+			kind: 'manifest',
+			repository: 'https://github.com/owner/repo',
+			plugin_version: '1.0.0',
+		},
+		installation: { sha256: digest, version: 'v1.0.0' },
+		host: { sha256: checksum(hostBytes) },
+		fixture: { sha256: checksum(fixtureBytes), checks: ['native invocation'] },
+		allow_config_processes: true,
+	};
+	try {
+		await writeFile(host, hostBytes);
+		await writeFile(fixturePath, fixtureBytes);
+		await writeFile(receiptPath, JSON.stringify(receipt));
+		const entry: Submission = {
+			schema_version: 2,
+			repository: 'owner/repo',
+			tag: 'v1.0.0',
+			kind: 'manifest',
+			artifact: { type: 'release-asset', name: 'plugin.json', sha256: digest },
+		};
+		await verifyCandidateReceipt(receiptPath, entry, host, fixturePath);
+		await writeFile(receiptPath, JSON.stringify({ ...receipt, allow_config_processes: false }));
+		await assert.rejects(verifyCandidateReceipt(receiptPath, entry, host, fixturePath), /Candidate receipt/);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
 	}
 });
 

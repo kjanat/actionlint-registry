@@ -74,7 +74,7 @@ func (t apiTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func assetURL(s Submission) string {
-	return "https://github.com/" + strings.ToLower(s.Repository) + "/releases/download/" + url.PathEscape(s.Tag) + "/" + url.PathEscape(s.Asset)
+	return "https://github.com/" + strings.ToLower(s.Repository) + "/releases/download/" + url.PathEscape(s.Tag) + "/" + url.PathEscape(s.AssetName())
 }
 
 // Resolve establishes identity from GitHub, not from plugin-authored metadata.
@@ -93,6 +93,25 @@ func (g *GitHub) Resolve(ctx context.Context, s Submission) (Entry, *github.Rele
 	if repo.GetID() <= 0 || repo.GetPrivate() || !strings.EqualFold(repo.GetFullName(), s.Repository) {
 		return Entry{}, nil, errors.New("repository must be public with matching canonical identity")
 	}
+	if s.IsOCI() {
+		// A digest source still belongs to a real authenticated forge tag. It
+		// does not require a GitHub release or claim release immutability.
+		ref, _, err := g.api.Git.GetRef(ctx, owner, name, "tags/"+s.Tag)
+		if err != nil {
+			return Entry{}, nil, err
+		}
+		if ref.GetRef() != "refs/tags/"+s.Tag {
+			return Entry{}, nil, reject("tag identity mismatch")
+		}
+		commit, _, err := g.api.Repositories.GetCommit(ctx, owner, name, "refs/tags/"+s.Tag, nil)
+		if err != nil {
+			return Entry{}, nil, err
+		}
+		if !commitPattern.MatchString(commit.GetSHA()) || commit.GetCommit().GetCommitter().GetDate().IsZero() {
+			return Entry{}, nil, reject("invalid public GitHub tag commit")
+		}
+		return Entry{Submission: s, RepositoryID: repo.GetID(), OwnerID: repo.GetOwner().GetID(), Commit: commit.GetSHA(), URL: s.Artifact.Reference(), PublishedAt: commit.GetCommit().GetCommitter().GetDate().Time}, nil, nil
+	}
 	release, _, err := g.api.Repositories.GetReleaseByTag(ctx, owner, name, s.Tag)
 	if err != nil {
 		return Entry{}, nil, err
@@ -102,14 +121,14 @@ func (g *GitHub) Resolve(ctx context.Context, s Submission) (Entry, *github.Rele
 	}
 	var chosen *github.ReleaseAsset
 	for _, asset := range release.Assets {
-		if asset.GetName() == s.Asset {
+		if asset.GetName() == s.AssetName() {
 			if chosen != nil {
 				return Entry{}, nil, errors.New("duplicate release asset")
 			}
 			chosen = asset
 		}
 	}
-	if chosen.GetID() <= 0 || chosen.GetState() != "uploaded" || chosen.GetSize() <= 0 || int64(chosen.GetSize()) > MaxArtifactBytes || chosen.GetDigest() != "sha256:"+s.SHA256 {
+	if chosen.GetID() <= 0 || chosen.GetState() != "uploaded" || chosen.GetSize() <= 0 || int64(chosen.GetSize()) > MaxArtifactBytes || chosen.GetDigest() != "sha256:"+s.Digest() {
 		return Entry{}, nil, errors.New("asset missing, oversized, incomplete, or SHA256 disagrees with GitHub")
 	}
 	canonicalURL := strings.Replace(assetURL(s), strings.ToLower(s.Repository), repo.GetFullName(), 1)
@@ -150,7 +169,7 @@ func (g *GitHub) Download(ctx context.Context, s Submission, asset *github.Relea
 	if err = errors.Join(copyErr, closeErr); err != nil {
 		return err
 	}
-	if n != int64(asset.GetSize()) || n > MaxArtifactBytes || hex.EncodeToString(h.Sum(nil)) != s.SHA256 {
+	if n != int64(asset.GetSize()) || n > MaxArtifactBytes || hex.EncodeToString(h.Sum(nil)) != s.Digest() {
 		return errors.New("download size or SHA256 does not match release asset")
 	}
 	return nil
@@ -173,7 +192,15 @@ func (g *GitHub) Candidates(ctx context.Context, s Source) ([]Submission, error)
 		}
 		for _, asset := range release.Assets {
 			if asset.GetName() == s.Asset {
-				candidate := Submission{1, "github", strings.ToLower(s.Repository), release.GetTagName(), s.Asset, strings.TrimPrefix(asset.GetDigest(), "sha256:"), s.Kind}
+				candidate := Submission{SchemaVersion: 1, Provider: "github", Repository: strings.ToLower(s.Repository), Tag: release.GetTagName(), Asset: s.Asset, SHA256: strings.TrimPrefix(asset.GetDigest(), "sha256:"), Kind: s.Kind}
+				if s.Kind == "manifest" {
+					distribution, err := ReleaseAsset(candidate.Asset, candidate.SHA256)
+					if err != nil {
+						return nil, err
+					}
+					candidate.SchemaVersion, candidate.Artifact = 2, distribution
+					candidate.Asset, candidate.SHA256 = "", ""
+				}
 				if err := candidate.Validate(); err != nil {
 					return nil, err
 				}

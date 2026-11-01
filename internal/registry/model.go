@@ -37,13 +37,14 @@ type Source struct {
 }
 
 type Submission struct {
-	SchemaVersion int    `json:"schema_version"`
-	Provider      string `json:"provider"`
-	Repository    string `json:"repository"`
-	Tag           string `json:"tag"`
-	Asset         string `json:"asset"`
-	SHA256        string `json:"sha256"`
-	Kind          string `json:"kind"`
+	SchemaVersion int          `json:"schema_version"`
+	Provider      string       `json:"provider"`
+	Repository    string       `json:"repository"`
+	Tag           string       `json:"tag"`
+	Asset         string       `json:"asset,omitempty"`
+	SHA256        string       `json:"sha256,omitempty"`
+	Kind          string       `json:"kind"`
+	Artifact      Distribution `json:"artifact,omitzero"`
 }
 
 func (s Source) Validate() error {
@@ -56,28 +57,40 @@ func (s Source) Validate() error {
 	if s.Provider == "github" && !repositoryPattern.MatchString(s.Repository) || s.Provider == "gitlab" && !gitlabRepositoryPattern.MatchString(s.Repository) {
 		return errors.New("repository must be owner/repository")
 	}
-	if !namePattern.MatchString(s.Asset) || !strings.HasSuffix(s.Asset, ".wasm") && !strings.HasSuffix(s.Asset, ".wasm.gz") {
-		return errors.New("asset must be a .wasm or .wasm.gz filename")
+	if !validAsset(s.Asset, s.Kind) {
+		return errors.New("asset extension must match its kind (.wasm or .json, optionally .gz)")
 	}
-	if s.Kind != "core" && s.Kind != "component" {
-		return errors.New("kind must be core or component")
+	if s.Kind != "core" && s.Kind != "component" && s.Kind != "manifest" {
+		return errors.New("kind must be core, component or manifest")
 	}
 	return nil
 }
 
-func (s Submission) Source() Source { return Source{s.Provider, s.Repository, s.Asset, s.Kind} }
+func (s Submission) Source() Source { return Source{s.Provider, s.Repository, s.AssetName(), s.Kind} }
 
 func (s Submission) Validate() error {
-	if s.SchemaVersion != 1 {
+	if s.SchemaVersion != 1 && s.SchemaVersion != 2 {
 		return errors.New("unsupported submission schema_version")
 	}
-	if err := s.Source().Validate(); err != nil {
+	if err := s.validateRepository(); err != nil {
 		return err
+	}
+	if s.Kind != "core" && s.Kind != "component" && s.Kind != "manifest" {
+		return errors.New("unsupported artifact kind")
+	}
+	if s.SchemaVersion == 1 && s.Kind == "manifest" {
+		return errors.New("process manifests require submission schema_version 2")
+	}
+	if s.SchemaVersion == 1 && !s.Artifact.IsZero() || s.SchemaVersion == 2 && (s.Artifact.IsZero() || s.Asset != "" || s.SHA256 != "") {
+		return errors.New("submission fields disagree with schema_version")
+	}
+	if !s.IsOCI() && !validAsset(s.AssetName(), s.Kind) {
+		return errors.New("asset extension disagrees with kind")
 	}
 	if !namePattern.MatchString(s.Tag) {
 		return errors.New("tag must contain only letters, digits, dot, underscore, plus or hyphen")
 	}
-	if !digestPattern.MatchString(s.SHA256) {
+	if !digestPattern.MatchString(s.Digest()) {
 		return errors.New("sha256 must be 64 lowercase hexadecimal characters")
 	}
 	return nil
@@ -182,6 +195,7 @@ type LegacyValidation struct {
 }
 
 type Entry struct {
+	IdentityVersion   int                   `json:"identity_version,omitempty"`
 	RecordVersion     int                   `json:"record_version,omitempty"`
 	Artifact          *artifact.Declaration `json:"artifact,omitempty"`
 	Submission        Submission            `json:"submission"`
@@ -208,17 +222,51 @@ func (e Entry) PluginID() string {
 	return ""
 }
 
+// PluginKey preserves historical repository keys. Package identities use a
+// separate domain and bind the exact metadata ID to the authenticated repository.
+func (e Entry) PluginKey() string {
+	if e.IdentityVersion == 2 {
+		return key("package-v2\n" + e.Receipt.Identity.Issuer + "\n" + e.Receipt.Identity.RepositoryID + "\n" + e.PluginID())
+	}
+	return e.Receipt.PluginKey()
+}
+
+func (e Entry) Name() string {
+	if e.IdentityVersion == 2 {
+		return strings.ToLower(e.PluginID())
+	}
+	return e.Submission.Provider + ".com/" + e.Submission.Repository
+}
+
+func packageID(id, repository string) bool {
+	suffix, ok := strings.CutPrefix(strings.ToLower(id), strings.ToLower(repository)+"/")
+	if !ok || suffix == "" {
+		return false
+	}
+	for segment := range strings.SplitSeq(suffix, "/") {
+		if !packageSegmentPattern.MatchString(segment) || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+var packageSegmentPattern = regexp.MustCompile(`^[a-z0-9_][a-z0-9._-]*$`)
+
 func (e Entry) declaration() (repository, version string, err error) {
 	switch {
 	case e.RecordVersion == 2 && e.Artifact != nil && e.Validation == nil:
 		if err = e.Artifact.Validate(); err != nil {
 			return "", "", err
 		}
-		if e.Artifact.Kind != e.Submission.Kind || e.Artifact.SHA256 != e.Submission.SHA256 {
+		if e.Artifact.Kind != e.Submission.Kind || e.Artifact.SHA256 != e.Submission.Digest() {
 			return "", "", errors.New("artifact disagrees with submission")
 		}
 		return e.Artifact.Repository, e.Artifact.PluginVersion, nil
 	case e.RecordVersion == 0 && e.Artifact == nil && e.Validation != nil:
+		if e.Submission.SchemaVersion != 1 {
+			return "", "", errors.New("historical validation requires a legacy submission")
+		}
 		v := e.Validation
 		if !commitPattern.MatchString(v.HostCommit) || v.Kind != e.Submission.Kind || v.PluginID == "" || len(v.Rules) == 0 || len(v.Checks) == 0 || len(v.Metadata) == 0 || !json.Valid(v.Metadata) || v.Repository == "" || v.PluginVersion == "" || v.Contract == "" || v.PolicyVersion != "1" {
 			return "", "", errors.New("invalid historical validation evidence")
@@ -229,7 +277,12 @@ func (e Entry) declaration() (repository, version string, err error) {
 	}
 }
 
-func (e Entry) PinnedURL() string { return e.URL + "#sha256=" + e.Submission.SHA256 }
+func (e Entry) PinnedURL() string {
+	if e.Submission.IsOCI() {
+		return e.URL
+	}
+	return e.URL + "#sha256=" + e.Submission.Digest()
+}
 
 type Index struct {
 	SchemaVersion int     `json:"schema_version"`
@@ -262,18 +315,37 @@ func (i *Index) Add(e Entry) error {
 	if !strings.EqualFold(repository, expectedRepository) || strings.TrimPrefix(version, "v") != strings.TrimPrefix(e.Submission.Tag, "v") {
 		return errors.New("embedded metadata disagrees with release identity")
 	}
-	if e.Submission.Provider == "github" && (e.ReleaseID <= 0 || e.AssetID <= 0 || !e.UpstreamImmutable) {
+	if e.Submission.IsOCI() && (e.ReleaseID != 0 || e.AssetID != 0 || e.UpstreamImmutable) {
+		return errors.New("OCI entry cannot claim upstream release identity")
+	}
+	if !e.Submission.IsOCI() && e.Submission.Provider == "github" && (e.ReleaseID <= 0 || e.AssetID <= 0 || !e.UpstreamImmutable) {
 		return errors.New("GitHub entry lacks immutable release identity")
 	}
 	if e.Submission.Provider == "gitlab" && e.UpstreamImmutable {
 		return errors.New("GitLab generic packages do not guarantee upstream immutability")
 	}
+	if e.IdentityVersion != 0 && e.IdentityVersion != 2 || e.IdentityVersion == 2 && !packageID(e.PluginID(), e.Submission.Provider+".com/"+e.Submission.Repository) {
+		return reject("invalid package identity or publishing repository")
+	}
 	for _, old := range i.Entries {
-		if old.Receipt.PluginKey() != e.Receipt.PluginKey() && (old.Submission.Provider != e.Submission.Provider || !strings.EqualFold(old.Submission.Repository, e.Submission.Repository)) {
+		samePublisher := old.Receipt.PluginKey() == e.Receipt.PluginKey()
+		sameRepository := old.Submission.Provider == e.Submission.Provider && strings.EqualFold(old.Submission.Repository, e.Submission.Repository)
+		sameSelector := strings.EqualFold(old.Name(), e.Name())
+		samePackageID := (old.IdentityVersion == 2 || e.IdentityVersion == 2) && strings.EqualFold(old.PluginID(), e.PluginID())
+		if !samePublisher && !sameRepository && !sameSelector && !samePackageID {
+			continue
+		}
+		if !samePublisher || !sameRepository || old.OwnerID != e.OwnerID {
+			return reject("registered publisher or plugin identity changed")
+		}
+		if old.PluginID() != e.PluginID() {
+			if strings.EqualFold(old.PluginID(), e.PluginID()) || sameSelector {
+				return reject("package selector is already registered")
+			}
 			continue
 		}
 		if pluginFor(old) != pluginFor(e) {
-			return reject("registered publisher or plugin identity changed")
+			return reject("registered plugin identity changed")
 		}
 		if old.Submission.Tag == e.Submission.Tag {
 			if old.Submission != e.Submission || old.ReleaseID != e.ReleaseID || old.AssetID != e.AssetID || old.Commit != e.Commit || old.URL != e.URL || old.UpstreamImmutable != e.UpstreamImmutable {
