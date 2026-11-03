@@ -6,6 +6,8 @@ actionlint.kjanat.dev/v2 v2.0.0-20261024183928-712b91ea5f12 h1:Bhmls1JZM3ar/plc7
 actionlint.kjanat.dev/v2 v2.0.0-20261024183928-712b91ea5f12/go.mod h1:n7ooaQr3kIfvvowCgGOe7A2roAAaJVCrQxhjrn7OLE0=
 actionlint.kjanat.dev/v2 v2.0.0-20261025004148-4ac04e03c0b9 h1:AIE8nxv6qJn9XfLdbEOJks9EcUkTYdFbkh64wzNZx7w=
 actionlint.kjanat.dev/v2 v2.0.0-20261025004148-4ac04e03c0b9/go.mod h1:egRAsG20UE/+wQntmQ3QOy4delS1iBh6z2lbB1WBoWw=
+actionlint.kjanat.dev/v2 v2.0.0-20261029222538-310b166054a3 h1:JMNv0z3mWJC3WOmIuVdKqUt/oxuuerU7ut6sHVshc7c=
+actionlint.kjanat.dev/v2 v2.0.0-20261029222538-310b166054a3/go.mod h1:egRAsG20UE/+wQntmQ3QOy4delS1iBh6z2lbB1WBoWw=
 github.com/bmatcuk/doublestar/v4 v4.10.3 h1:1UIv1+fqH3++ViVkpnaPTB+Pi1UHycnPFAq14zgK+gI=
 github.com/bmatcuk/doublestar/v4 v4.10.3/go.mod h1:xBQ8jztBU6kakFMg+8WGxn0c6z1fTSPVIjEY1Wr7jzc=
 github.com/clipperhouse/uax29/v2 v2.7.0 h1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=
