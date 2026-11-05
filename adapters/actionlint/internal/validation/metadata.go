@@ -12,17 +12,18 @@ import (
 	"net/url"
 	"strings"
 
-	"actionlint.kjanat.dev/v2/analyzer"
-	"actionlint.kjanat.dev/v2/plugin"
-	"actionlint.kjanat.dev/v2/rule"
+	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
+	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
+
+	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
 )
 
-// The selected host validates exported WIT types before starting the guest.
+// ErrUnsupportedContract identifies a contract version this checker does not implement.
 var ErrUnsupportedContract = errors.New("contract is not supported by this checker")
 
-const componentInterface = "kjanat:actionlint/analyzer@0.1.0"
-const scriptInterface = "kjanat:actionlint/script-engine@0.1.0"
-const runnerInterface = "kjanat:actionlint/runner-provider@0.1.0"
+const componentInterface = "kjanat:actionlint/analyzer@0.2.0"
+const scriptInterface = "kjanat:actionlint/script-engine@0.2.0"
+const runnerInterface = "kjanat:actionlint/runner-provider@0.2.0"
 
 func supportedComponent(iface string) bool {
 	switch iface {
@@ -33,11 +34,10 @@ func supportedComponent(iface string) bool {
 	}
 }
 
-// componentDeclaration reuses the host's public descriptor and adapts its JSON field names.
-// The rule fields retain the types defined by the host.
+// componentDeclaration uses the host's declaration types with the metadata JSON field names.
 type componentDeclaration struct {
 	rule.Descriptor
-	Requires []analyzer.Fact `json:"requires"`
+	RequiredInputs []checkinputs.InputKind `json:"required_inputs"`
 }
 
 type embeddedMetadata struct {
@@ -63,7 +63,7 @@ type embeddedMetadata struct {
 	Descriptor   *componentDeclaration `json:"descriptor"`
 }
 
-func inspectMetadata(ctx context.Context, info plugin.ArtifactInfo) (embeddedMetadata, error) {
+func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMetadata, error) {
 	var metadata embeddedMetadata
 	if len(info.Metadata) == 0 {
 		return metadata, errors.New("registry admission requires a top-level actionlint.plugin custom section")
@@ -71,7 +71,7 @@ func inspectMetadata(ctx context.Context, info plugin.ArtifactInfo) (embeddedMet
 	// Read only contract identity before touching host-specific descriptors.
 	// An unfamiliar ABI may legitimately change their JSON representation.
 	switch info.Kind {
-	case plugin.CoreArtifact:
+	case pluginartifact.Core:
 		var contract struct {
 			ABI       uint32 `json:"abi_version"`
 			Transport string `json:"transport"`
@@ -82,7 +82,7 @@ func inspectMetadata(ctx context.Context, info plugin.ArtifactInfo) (embeddedMet
 		if contract.ABI != 1 || contract.Transport != "wasm-core-json" {
 			return metadata, ErrUnsupportedContract
 		}
-	case plugin.ComponentArtifact:
+	case pluginartifact.Component:
 		var contract struct {
 			Transport string `json:"transport"`
 			Interface string `json:"interface"`
@@ -118,7 +118,7 @@ func inspectMetadata(ctx context.Context, info plugin.ArtifactInfo) (embeddedMet
 		return metadata, errors.New("embedded metadata repository must be an absolute HTTPS repository URL")
 	}
 	switch info.Kind {
-	case plugin.CoreArtifact:
+	case pluginartifact.Core:
 		if metadata.ABIVersion != 1 || metadata.Transport != "wasm-core-json" {
 			return metadata, fmt.Errorf("%w: requires ABI 1 and wasm-core-json transport", ErrUnsupportedContract)
 		}
@@ -141,7 +141,7 @@ func inspectMetadata(ctx context.Context, info plugin.ArtifactInfo) (embeddedMet
 				return metadata, fmt.Errorf("embedded configuration schema: %w", err)
 			}
 		}
-	case plugin.ComponentArtifact:
+	case pluginartifact.Component:
 		if metadata.Interface != componentInterface {
 			break
 		}
@@ -169,24 +169,24 @@ func (metadata embeddedMetadata) contract() string {
 	return metadata.Interface + "#sha256=" + metadata.ContractSHA256
 }
 
-func (declared *componentDeclaration) matches(actual analyzer.Descriptor) error {
+func (declared *componentDeclaration) matches(actual checkinputs.Descriptor) error {
 	if declared == nil {
 		return errors.New("missing embedded component descriptor")
 	}
-	// Normalize optional fields through the same public Go descriptor, then
+	// Normalize optional fields through the host's descriptor, then
 	// canonicalize JSON so option schema key order is immaterial.
 	normalized := *declared
-	if len(normalized.Requires) == 0 {
-		normalized.Requires = nil
+	if len(normalized.RequiredInputs) == 0 {
+		normalized.RequiredInputs = nil
 	}
-	if len(actual.Requires) == 0 {
-		actual.Requires = nil
+	if len(actual.RequiredInputs) == 0 {
+		actual.RequiredInputs = nil
 	}
 	expected, err := json.Marshal(normalized)
 	if err != nil {
 		return err
 	}
-	observed, err := json.Marshal(componentDeclaration{Descriptor: actual.Descriptor, Requires: actual.Requires})
+	observed, err := json.Marshal(componentDeclaration{Descriptor: actual.Descriptor, RequiredInputs: actual.RequiredInputs})
 	if err != nil {
 		return err
 	}

@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"slices"
 
-	"actionlint.kjanat.dev/v2/analysis"
-	"actionlint.kjanat.dev/v2/analyzer"
-	"actionlint.kjanat.dev/v2/diagnostic"
-	"actionlint.kjanat.dev/v2/plugin"
-	"actionlint.kjanat.dev/v2/rule"
+	checking "actionlint.kjanat.dev/v2/internal/checking"
+	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
+	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	"actionlint.kjanat.dev/v2/internal/input/workspace"
+	componenthost "actionlint.kjanat.dev/v2/internal/plugins/execution/component"
+	results "actionlint.kjanat.dev/v2/internal/results"
 )
 
 const sampleWorkflow = "name: Registry smoke\non: push\njobs:\n  smoke:\n    runs-on: ubuntu-latest\n    steps:\n      - id: sample\n        shell: bash\n        run: |\n          printf '%s\\n' $value\n"
@@ -19,7 +20,7 @@ const emptyWorkflow = "name: Registry empty\non: push\njobs: {}\n"
 const samplePath = "registry-smoke.yml"
 
 func validateComponent(ctx context.Context, path string, metadata embeddedMetadata) (result Result, err error) {
-	component, err := plugin.Load(ctx, path, plugin.Options{Timeout: callTimeout, MemoryPages: 1024})
+	component, err := componenthost.Load(ctx, path, componenthost.Options{Timeout: callTimeout, MemoryPages: 1024, ReservedRules: checking.BuiltinRuleNames()})
 	if err != nil {
 		return result, err
 	}
@@ -46,7 +47,7 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 		if err != nil {
 			return result, fmt.Errorf("sample invocation %d: %w", attempt+1, err)
 		}
-		if descriptor.Name == "shellcheck-rs" && !slices.ContainsFunc(findings, func(d diagnostic.Diagnostic) bool { return d.Code == "SC2086" }) {
+		if descriptor.Name == "shellcheck-rs" && !slices.ContainsFunc(findings, func(d results.Diagnostic) bool { return d.Code == "SC2086" }) {
 			return result, errors.New("shellcheck smoke sample did not report SC2086")
 		}
 	}
@@ -59,15 +60,15 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 }
 
 type checkedAnalyzer struct {
-	analyzer.Analyzer
+	checkinputs.Checker
 	rules    []string
-	findings []diagnostic.Diagnostic
+	findings []results.Diagnostic
 	called   bool
 }
 
-func (checked *checkedAnalyzer) Analyze(ctx context.Context, input analyzer.Input) ([]diagnostic.Diagnostic, error) {
+func (checked *checkedAnalyzer) CheckDocument(ctx context.Context, input checkinputs.Input) ([]results.Diagnostic, error) {
 	checked.called = true
-	findings, err := checked.Analyzer.Analyze(ctx, input)
+	findings, err := checked.Checker.CheckDocument(ctx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -78,14 +79,14 @@ func (checked *checkedAnalyzer) Analyze(ctx context.Context, input analyzer.Inpu
 	return findings, nil
 }
 
-// Invoke through the public application so schema compilation, default options,
-// descriptor collisions and required facts follow the same path as real use.
-func analyzeComponent(ctx context.Context, component analyzer.Analyzer, content string, names []string) ([]diagnostic.Diagnostic, error) {
-	checked := &checkedAnalyzer{Analyzer: component, rules: names}
-	_, err := analysis.Analyze(ctx, analysis.Request{
-		Sources: []analysis.Source{{Path: samplePath, Content: []byte(content)}},
-		Options: analysis.Options{Analyzers: []analyzer.Registration{{Analyzer: checked}}},
-	})
+// Use the host checking pipeline so option validation, rule-name collisions and
+// required inputs follow the same path as ordinary checks.
+func analyzeComponent(ctx context.Context, component checkinputs.Checker, content string, names []string) ([]results.Diagnostic, error) {
+	checked := &checkedAnalyzer{Checker: component, rules: names}
+	_, err := checking.Analyze(ctx,
+		checking.Options{Analyzers: []checkinputs.Registration{{Checker: checked}}},
+		[]workspace.Source{{Path: samplePath, Content: []byte(content)}},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -96,40 +97,40 @@ func analyzeComponent(ctx context.Context, component analyzer.Analyzer, content 
 }
 
 type inputCollector struct {
-	input      *analyzer.Input
+	input      *checkinputs.Input
 	descriptor rule.Descriptor
 }
 
-func (collector *inputCollector) Descriptor() analyzer.Descriptor {
-	return analyzer.Descriptor{Descriptor: collector.descriptor, Requires: []analyzer.Fact{
-		analyzer.Source, analyzer.Scripts, analyzer.Mappings, analyzer.Invocations, analyzer.Execution, analyzer.Dependencies,
+func (collector *inputCollector) Descriptor() checkinputs.Descriptor {
+	return checkinputs.Descriptor{Descriptor: collector.descriptor, RequiredInputs: []checkinputs.InputKind{
+		checkinputs.Source, checkinputs.Scripts, checkinputs.Mappings, checkinputs.Invocations, checkinputs.Execution, checkinputs.Dependencies,
 	}}
 }
 
-func (collector *inputCollector) Analyze(_ context.Context, input analyzer.Input) ([]diagnostic.Diagnostic, error) {
+func (collector *inputCollector) CheckDocument(_ context.Context, input checkinputs.Input) ([]results.Diagnostic, error) {
 	collector.input = &input
 	return nil, nil
 }
 
-func workflowInput(ctx context.Context, content string) (analyzer.Input, error) {
+func workflowInput(ctx context.Context, content string) (checkinputs.Input, error) {
 	return workflowInputWithSchema(ctx, content, nil)
 }
 
-func workflowInputWithSchema(ctx context.Context, content string, schema json.RawMessage) (analyzer.Input, error) {
-	return workflowInputWithDescriptor(ctx, content, rule.Descriptor{Name: "registry-fixture", Description: "Collect shared workflow facts", OptionsSchema: schema})
+func workflowInputWithSchema(ctx context.Context, content string, schema json.RawMessage) (checkinputs.Input, error) {
+	return workflowInputWithDescriptor(ctx, content, rule.Descriptor{Name: "registry-fixture", Description: "Collect shared workflow facts", Category: "correctness", OptionsSchema: schema})
 }
 
-func workflowInputWithDescriptor(ctx context.Context, content string, descriptor rule.Descriptor) (analyzer.Input, error) {
+func workflowInputWithDescriptor(ctx context.Context, content string, descriptor rule.Descriptor) (checkinputs.Input, error) {
 	collector := &inputCollector{descriptor: descriptor}
-	_, err := analysis.Analyze(ctx, analysis.Request{
-		Sources: []analysis.Source{{Path: samplePath, Content: []byte(content)}},
-		Options: analysis.Options{Analyzers: []analyzer.Registration{{Analyzer: collector}}},
-	})
+	_, err := checking.Analyze(ctx,
+		checking.Options{Analyzers: []checkinputs.Registration{{Checker: collector}}},
+		[]workspace.Source{{Path: samplePath, Content: []byte(content)}},
+	)
 	if err != nil {
-		return analyzer.Input{}, err
+		return checkinputs.Input{}, err
 	}
 	if collector.input == nil {
-		return analyzer.Input{}, errors.New("host did not produce workflow facts")
+		return checkinputs.Input{}, errors.New("host did not produce workflow facts")
 	}
 	return *collector.input, nil
 }

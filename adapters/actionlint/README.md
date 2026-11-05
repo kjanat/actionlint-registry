@@ -1,7 +1,10 @@
 # actionlint compatibility checker
 
-This independent Go module owns the actionlint SDK dependency and runtime fixtures.
-The registry's admission service does not import or execute it.
+This unpublished Go module validates plugins with actionlint's private host
+implementation. Its module path, `actionlint.kjanat.dev/v2/registry/validation`,
+allows it to import the host's `internal` packages under Go's import rules.
+The registry invokes the checker as a separate process rather than importing
+the host implementation into its admission service.
 
 Build it from the repository root with:
 
@@ -14,7 +17,7 @@ report to stdout. Run it through the registry's `check` command to verify the
 accepted artifact's checksum, isolate inherited credentials, and store the report.
 The process boundary does not provide an operating-system sandbox.
 
-The checker uses actionlint v2 at `2fa382b984bee67e014a112f4cbfba9604efb983`.
+The checker uses actionlint v2 at `99a250b29aaadfdb2d95a0c6ab954d3f9f11bdc8`.
 It supports core ABI 1 and the analyzer, script-engine and runner-provider WIT roles.
 The host validates exported component types. A WIT source checksum also covers
 documentation comments, so a different checksum alone does not reject an analyzer.

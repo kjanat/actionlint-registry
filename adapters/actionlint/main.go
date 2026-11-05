@@ -12,7 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"registry.actionlint.kjanat.dev/adapters/actionlint/internal/validation"
+	"actionlint.kjanat.dev/v2/registry/validation/internal/validation"
 )
 
 type host struct {

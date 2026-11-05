@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"slices"
 
-	"actionlint.kjanat.dev/v2/analyzer"
-	"actionlint.kjanat.dev/v2/diagnostic"
-	"actionlint.kjanat.dev/v2/plugin"
-	"actionlint.kjanat.dev/v2/rule"
-	"actionlint.kjanat.dev/v2/runner"
+	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
+	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	sourcepos "actionlint.kjanat.dev/v2/internal/input/source"
+	runner "actionlint.kjanat.dev/v2/internal/model/runners/contract"
+	componenthost "actionlint.kjanat.dev/v2/internal/plugins/execution/component"
 )
 
-func validateScriptComponent(ctx context.Context, component *plugin.Component) (Result, error) {
+func validateScriptComponent(ctx context.Context, component *componenthost.Plugin) (Result, error) {
 	if !component.HasScriptEngine() {
 		return Result{}, errors.New("component does not implement its declared script-engine role")
 	}
@@ -32,7 +32,7 @@ func validateScriptComponent(ctx context.Context, component *plugin.Component) (
 	if err := component.ValidateConfig(ctx, nil); err != nil {
 		return Result{}, fmt.Errorf("default configuration: %w", err)
 	}
-	request := analyzer.ScriptRequest{Source: "\n", Filename: "registry-smoke.txt"}
+	request := checkinputs.ScriptRequest{Source: "\n", Filename: "registry-smoke.txt"}
 	if slices.Contains(descriptor.Shells, "python") || descriptor.Engine == "ruff" {
 		request.Source, request.Filename = "print(missing)\n", "registry-smoke.py"
 	}
@@ -44,7 +44,7 @@ func validateScriptComponent(ctx context.Context, component *plugin.Component) (
 		if err := scriptFindings(findings, request); err != nil {
 			return Result{}, err
 		}
-		if descriptor.Engine == "ruff" && !slices.ContainsFunc(findings, func(d analyzer.ScriptDiagnostic) bool { return d.Code == "F821" }) {
+		if descriptor.Engine == "ruff" && !slices.ContainsFunc(findings, func(d checkinputs.ScriptDiagnostic) bool { return d.Code == "F821" }) {
 			return Result{}, errors.New("ruff smoke sample did not report F821")
 		}
 	}
@@ -52,7 +52,7 @@ func validateScriptComponent(ctx context.Context, component *plugin.Component) (
 		Checks: []string{"host-wit-contract", "script-engine", "rule-descriptors", "application-registration", "default-config", "repeated-sample", "diagnostic-ranges"}}, nil
 }
 
-func validateRunnerComponent(ctx context.Context, component *plugin.Component, metadata embeddedMetadata) (Result, error) {
+func validateRunnerComponent(ctx context.Context, component *componenthost.Plugin, metadata embeddedMetadata) (Result, error) {
 	if !component.HasRunnerProvider() {
 		return Result{}, errors.New("component does not implement its declared runner-provider role")
 	}
@@ -64,7 +64,7 @@ func validateRunnerComponent(ctx context.Context, component *plugin.Component, m
 	// a valid answer for each selector, without fetching resources during analysis.
 	for _, target := range descriptor.Targets {
 		request := runner.Request{Target: target, Scope: "registry-smoke", Snapshot: runner.Snapshot{Scope: "registry-smoke", Freshness: runner.Missing},
-			Selectors: []runner.Selector{{Labels: []runner.Constraint{{Value: runner.Literal("registry-smoke"), Position: diagnostic.Position{Line: 1, Column: 1}}}}}}
+			Selectors: []runner.Selector{{Labels: []runner.Constraint{{Value: runner.Literal("registry-smoke"), Position: sourcepos.Position{Line: 1, Column: 1}}}}}}
 		for attempt := range 2 {
 			answers, err := component.ResolveRunners(ctx, request)
 			if err != nil {

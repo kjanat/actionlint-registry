@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const coreMetadata = `{"metadata_version":1,"abi_version":1,"transport":"wasm-core-json","id":"registry-smoke","name":"Registry smoke","description":"Registry fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interfaces":{"check":[{"version":1,"export":"check"}],"validate_config":[{"version":1,"export":"validate_config"}],"metadata":[{"version":1,"export":"metadata"}]},"engine":{"name":"smoke"},"capabilities":{"script_shells":["bash"]},"rules":[{"name":"smoke","description":"Smoke test rule"}]}`
+const coreMetadata = `{"metadata_version":1,"abi_version":1,"transport":"wasm-core-json","id":"registry-smoke","name":"Registry smoke","description":"Registry fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interfaces":{"check":[{"version":1,"export":"check"}],"validate_config":[{"version":1,"export":"validate_config"}],"metadata":[{"version":1,"export":"metadata"}]},"engine":{"name":"smoke"},"capabilities":{"script_shells":["bash"]},"rules":[{"name":"smoke","description":"Smoke test rule","category":"correctness"}]}`
 
 // coreFixture encodes an actual minimal core module, avoiding an external WAT
 // compiler in the test dependency graph. alloc returns scratch memory; check

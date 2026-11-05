@@ -15,12 +15,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"actionlint.kjanat.dev/v2/analyzer"
-	"actionlint.kjanat.dev/v2/plugin"
-	"actionlint.kjanat.dev/v2/rule"
+	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
+	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
+	corewasm "actionlint.kjanat.dev/v2/internal/plugins/execution/module"
 )
 
-const HostCommit = "2fa382b984bee67e014a112f4cbfba9604efb983"
+const HostCommit = "99a250b29aaadfdb2d95a0c6ab954d3f9f11bdc8"
 
 const callTimeout = 10 * time.Second
 
@@ -61,19 +62,20 @@ func Validate(ctx context.Context, path string) (Result, error) {
 	if process {
 		return Result{}, fmt.Errorf("%w: process/1 requires a process-aware checker; this checker exercises WASM contracts only", ErrUnsupportedContract)
 	}
-	info, err := plugin.Inspect(ctx, path, plugin.ArtifactOptions{MaxBytes: 128 << 20})
+	artifact, err := pluginartifact.Resolve(ctx, path, pluginartifact.Options{MaxBytes: 128 << 20})
 	if err != nil {
 		return Result{}, err
 	}
+	info := artifact.Info
 	manifest, err := inspectMetadata(ctx, info)
 	if err != nil {
 		return Result{}, err
 	}
 	var result Result
 	switch info.Kind {
-	case plugin.CoreArtifact:
+	case pluginartifact.Core:
 		result, err = validateCore(ctx, path)
-	case plugin.ComponentArtifact:
+	case pluginartifact.Component:
 		result, err = validateComponent(ctx, path, manifest)
 	default:
 		return Result{}, errors.New("unsupported artifact kind")
@@ -94,7 +96,7 @@ func Validate(ctx context.Context, path string) (Result, error) {
 }
 
 func validateCore(ctx context.Context, path string) (result Result, err error) {
-	engine, err := plugin.LoadEngine(ctx, path, plugin.EngineOptions{Timeout: callTimeout, MemoryPages: 4096})
+	engine, err := corewasm.Load(ctx, path, corewasm.Options{Timeout: callTimeout, MemoryPages: 4096})
 	if err != nil {
 		return result, err
 	}
@@ -133,7 +135,7 @@ func validateCore(ctx context.Context, path string) (result Result, err error) {
 	if err := engine.ValidateConfig(ctx, nil); err != nil {
 		return result, fmt.Errorf("default configuration: %w", err)
 	}
-	request := analyzer.ScriptRequest{Source: "\n", Filename: "registry-smoke.txt"}
+	request := checkinputs.ScriptRequest{Source: "\n", Filename: "registry-smoke.txt"}
 	if slices.Contains(metadata.Capabilities.ScriptShells, "python") || metadata.Engine.Name == "ruff" {
 		request.Source, request.Filename = "print(missing)\n", "registry-smoke.py"
 	}
@@ -145,7 +147,7 @@ func validateCore(ctx context.Context, path string) (result Result, err error) {
 		if err := scriptFindings(findings, request); err != nil {
 			return result, err
 		}
-		if metadata.Engine.Name == "ruff" && !slices.ContainsFunc(findings, func(d analyzer.ScriptDiagnostic) bool { return d.Code == "F821" }) {
+		if metadata.Engine.Name == "ruff" && !slices.ContainsFunc(findings, func(d checkinputs.ScriptDiagnostic) bool { return d.Code == "F821" }) {
 			return result, errors.New("ruff smoke sample did not report F821")
 		}
 	}

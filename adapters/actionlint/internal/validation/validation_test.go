@@ -9,10 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"actionlint.kjanat.dev/v2/analyzer"
-	"actionlint.kjanat.dev/v2/diagnostic"
-	"actionlint.kjanat.dev/v2/plugin"
-	"actionlint.kjanat.dev/v2/rule"
+	"actionlint.kjanat.dev/v2/internal/checking"
+	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
+	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	sourcepos "actionlint.kjanat.dev/v2/internal/input/source"
+	componenthost "actionlint.kjanat.dev/v2/internal/plugins/execution/component"
+	results "actionlint.kjanat.dev/v2/internal/results"
 )
 
 func TestCompatibleComponent(t *testing.T) {
@@ -26,7 +28,7 @@ func TestCompatibleComponent(t *testing.T) {
 }
 
 func TestComponentFindingUsesWorkflowCoordinates(t *testing.T) {
-	component, err := plugin.Load(t.Context(), filepath.Join("testdata", "component-no-sudo.wasm"), plugin.Options{Timeout: callTimeout, MemoryPages: 1024})
+	component, err := componenthost.Load(t.Context(), filepath.Join("testdata", "component-no-sudo.wasm"), componenthost.Options{Timeout: callTimeout, MemoryPages: 1024, ReservedRules: checking.BuiltinRuleNames()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,11 +41,11 @@ func TestComponentFindingUsesWorkflowCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings, err := component.Analyze(t.Context(), input)
+	findings, err := component.CheckDocument(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 1 || findings[0].Start != (diagnostic.Position{Line: 10, Column: 11}) {
+	if len(findings) != 1 || findings[0].Start != (sourcepos.Position{Line: 10, Column: 11}) {
 		t.Fatalf("expected mapped sudo diagnostic: %+v", findings)
 	}
 	if err := componentFindings(findings, input, []string{"no-sudo"}); err != nil {
@@ -141,11 +143,11 @@ type optionsAnalyzer struct {
 	called bool
 }
 
-func (candidate *optionsAnalyzer) Descriptor() analyzer.Descriptor {
-	return analyzer.Descriptor{Name: "registry-options-test", Description: "Exercise option registration", OptionsSchema: candidate.schema}
+func (candidate *optionsAnalyzer) Descriptor() checkinputs.Descriptor {
+	return checkinputs.Descriptor{Name: "registry-options-test", Description: "Exercise option registration", Category: "correctness", OptionsSchema: candidate.schema}
 }
 
-func (candidate *optionsAnalyzer) Analyze(context.Context, analyzer.Input) ([]diagnostic.Diagnostic, error) {
+func (candidate *optionsAnalyzer) CheckDocument(context.Context, checkinputs.Input) ([]results.Diagnostic, error) {
 	candidate.called = true
 	return nil, nil
 }
@@ -176,26 +178,26 @@ func TestDescriptorBounds(t *testing.T) {
 }
 
 func TestDiagnosticBounds(t *testing.T) {
-	request := analyzer.ScriptRequest{Source: "é\n", Filename: "test.py"}
-	valid := analyzer.ScriptDiagnostic{Filename: request.Filename, Code: "X", Message: "example", Location: analyzer.ScriptPosition{Row: 1, Column: 1}, EndLocation: analyzer.ScriptPosition{Row: 1, Column: 2}}
-	if err := scriptFindings([]analyzer.ScriptDiagnostic{valid}, request); err != nil {
+	request := checkinputs.ScriptRequest{Source: "é\n", Filename: "test.py"}
+	valid := checkinputs.ScriptDiagnostic{Filename: request.Filename, Code: "X", Message: "example", Location: checkinputs.ScriptPosition{Row: 1, Column: 1}, EndLocation: checkinputs.ScriptPosition{Row: 1, Column: 2}}
+	if err := scriptFindings([]checkinputs.ScriptDiagnostic{valid}, request); err != nil {
 		t.Fatal(err)
 	}
 	invalid := valid
 	invalid.EndLocation.Column = 3 // Byte offsets are not Unicode scalar offsets.
-	if err := scriptFindings([]analyzer.ScriptDiagnostic{invalid}, request); err == nil {
+	if err := scriptFindings([]checkinputs.ScriptDiagnostic{invalid}, request); err == nil {
 		t.Fatal("accepted out-of-bounds location")
 	}
 	input, err := workflowInput(t.Context(), sampleWorkflow)
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := diagnostic.Diagnostic{Rule: "test", Message: "example", Start: diagnostic.Position{Line: 1, Column: 1}, End: diagnostic.Position{Line: 1, Column: 2}}
-	if err := componentFindings([]diagnostic.Diagnostic{d}, input, []string{"test"}); err != nil {
+	d := results.Diagnostic{Rule: "test", Message: "example", Start: sourcepos.Position{Line: 1, Column: 1}, End: sourcepos.Position{Line: 1, Column: 2}}
+	if err := componentFindings([]results.Diagnostic{d}, input, []string{"test"}); err != nil {
 		t.Fatal(err)
 	}
-	d.Fixes = []diagnostic.Fix{{Edits: []diagnostic.Edit{{Path: "other-file", Start: d.Start, End: d.End}}}}
-	if err := componentFindings([]diagnostic.Diagnostic{d}, input, []string{"test"}); err == nil {
+	d.Fixes = []results.Fix{{Edits: []results.Edit{{Path: "other-file", Start: d.Start, End: d.End}}}}
+	if err := componentFindings([]results.Diagnostic{d}, input, []string{"test"}); err == nil {
 		t.Fatal("accepted edit outside fixture")
 	}
 }

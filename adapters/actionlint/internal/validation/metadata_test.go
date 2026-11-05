@@ -1,7 +1,6 @@
 package validation
 
 import (
-	"actionlint.kjanat.dev/v2/plugin"
 	"bytes"
 	"errors"
 	"os"
@@ -9,11 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"actionlint.kjanat.dev/v2/analyzer"
-	"actionlint.kjanat.dev/v2/rule"
+	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
+	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
 )
 
-const componentMetadata = `{"metadata_version":1,"transport":"wasm-component","id":"no-sudo","name":"No sudo","description":"Registry component fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/analyzer@0.1.0","contract_sha256":"7ce5cd5b7c62542d8b3b9860cdc5b1fa050ee50a87d068765b5050261861dfa7","descriptor":{"name":"no-sudo","description":"Check runner privilege assumptions","category":"portability","subcategory":"scripts","maturity":"stable","provider":"example","explanation":"Self-hosted runners may not provide sudo.","help":"Run without privilege elevation or explicitly prepare the runner.","fix_availability":"none","options_schema":{},"requires":["scripts","invocations"]}}`
+const componentMetadata = `{"metadata_version":1,"transport":"wasm-component","id":"no-sudo","name":"No sudo","description":"Registry component fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/analyzer@0.2.0","contract_sha256":"287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23","descriptor":{"name":"no-sudo","description":"Check runner privilege assumptions","category":"suspicious","subcategory":"scripts","maturity":"stable","provider":"example","explanation":"Self-hosted runners may not provide sudo.","help":"Run without privilege elevation or explicitly prepare the runner.","options_schema":{},"required_inputs":["scripts","invocations"]}}`
 
 func metadataSection(metadata string) []byte {
 	name := "actionlint.plugin"
@@ -111,21 +111,21 @@ func TestCoreStaticRuntimeMismatch(t *testing.T) {
 	}
 }
 
-func TestEmptyRequiredFactsAreEquivalent(t *testing.T) {
+func TestEmptyRequiredInputsAreEquivalent(t *testing.T) {
 	descriptor := rule.Descriptor{Name: "example", Description: "Example"}
-	declared := componentDeclaration{Descriptor: descriptor, Requires: []analyzer.Fact{}}
-	if err := declared.matches(analyzer.Descriptor{Descriptor: descriptor}); err != nil {
+	declared := componentDeclaration{Descriptor: descriptor, RequiredInputs: []checkinputs.InputKind{}}
+	if err := declared.matches(checkinputs.Descriptor{Descriptor: descriptor}); err != nil {
 		t.Fatal(err)
 	}
-	if declared.Requires == nil {
+	if declared.RequiredInputs == nil {
 		t.Fatal("comparison mutated declaration")
 	}
 }
 
 func TestUnknownContractCheckedBeforeHostSpecificFields(t *testing.T) {
-	for _, info := range []plugin.ArtifactInfo{
-		{Kind: plugin.ComponentArtifact, Metadata: []byte(`{"transport":"wasm-component","interface":"example:future/analyzer@2.0.0","contract_sha256":"future","abi_version":{"unrelated":"extension"},"descriptor":{"requires":{"new":"shape"}}}`)},
-		{Kind: plugin.CoreArtifact, Metadata: []byte(`{"transport":"wasm-core-json","abi_version":999,"interface":{"unrelated":"extension"},"interfaces":{"check":"new-shape"}}`)},
+	for _, info := range []pluginartifact.Info{
+		{Kind: pluginartifact.Component, Metadata: []byte(`{"transport":"wasm-component","interface":"example:future/analyzer@2.0.0","contract_sha256":"future","abi_version":{"unrelated":"extension"},"descriptor":{"requires":{"new":"shape"}}}`)},
+		{Kind: pluginartifact.Core, Metadata: []byte(`{"transport":"wasm-core-json","abi_version":999,"interface":{"unrelated":"extension"},"interfaces":{"check":"new-shape"}}`)},
 	} {
 		if _, err := inspectMetadata(t.Context(), info); !errors.Is(err, ErrUnsupportedContract) {
 			t.Fatalf("unknown contract became runtime failure: %v", err)
