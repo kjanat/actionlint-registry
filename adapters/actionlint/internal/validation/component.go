@@ -35,7 +35,11 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 		return result, errors.New("component does not implement its declared analyzer role")
 	}
 	descriptor := component.Descriptor()
-	if err := metadata.Descriptor.matches(descriptor); err != nil {
+	declared, err := decodeDescriptor[componentDeclaration](metadata.Descriptor)
+	if err != nil {
+		return result, err
+	}
+	if err := declared.matches(descriptor); err != nil {
 		return result, err
 	}
 	names, err := ruleNames([]rule.Descriptor{descriptor.Descriptor})
@@ -55,7 +59,7 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 	if err != nil {
 		return result, fmt.Errorf("empty workflow: %w", err)
 	}
-	return Result{Kind: "component", PluginID: descriptor.Name, Rules: names,
+	return Result{Kind: "component", PluginID: metadata.ID, Rules: names,
 		Checks: []string{"host-wit-contract", "rule-descriptors", "application-registration", "default-config", "repeated-sample", "diagnostic-ranges", "empty-workflow"}, HostCommit: HostCommit}, nil
 }
 
@@ -102,7 +106,7 @@ type inputCollector struct {
 }
 
 func (collector *inputCollector) Descriptor() checkinputs.Descriptor {
-	descriptor := collector.descriptor
+	descriptor := collector.descriptor.Clone()
 	descriptor.RequiredInputs = []rule.InputKind{rule.Source, rule.Scripts, rule.Mappings, rule.Invocations, rule.Execution, rule.Dependencies}
 	return checkinputs.Descriptor{Descriptor: descriptor}
 }

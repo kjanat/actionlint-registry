@@ -57,6 +57,7 @@ func TestAdmissionRequiresEmbeddedMetadata(t *testing.T) {
 
 func TestEmbeddedComponentDescriptorMustMatchRuntime(t *testing.T) {
 	for _, metadata := range []string{
+		strings.Replace(componentMetadata, `"descriptor":{"name":"no-sudo"`, `"descriptor":{"name":"different-rule"`, 1),
 		strings.Replace(componentMetadata, "Check runner privilege assumptions", "Different description", 1),
 		strings.Replace(componentMetadata, `"scripts","invocations"`, `"scripts","dependencies"`, 1),
 		strings.Replace(componentMetadata, `"options_schema":{}`, `"options_schema":{"type":"object"}`, 1),
@@ -65,6 +66,17 @@ func TestEmbeddedComponentDescriptorMustMatchRuntime(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "differs from runtime") {
 			t.Fatalf("expected static/runtime mismatch, got %v", err)
 		}
+	}
+}
+
+func TestComponentPackageIdentityDiffersFromRuleName(t *testing.T) {
+	metadata := strings.Replace(componentMetadata, `"id":"no-sudo"`, `"id":"example/package"`, 1)
+	result, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PluginID != "example/package" || len(result.Rules) != 1 || result.Rules[0] != "no-sudo" {
+		t.Fatalf("package and rule identities were conflated: %+v", result)
 	}
 }
 

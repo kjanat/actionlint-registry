@@ -57,8 +57,12 @@ func validateRunnerComponent(ctx context.Context, component *componenthost.Plugi
 		return Result{}, errors.New("component does not implement its declared runner-provider role")
 	}
 	descriptor := component.RunnerDescriptor()
-	if descriptor.Name != metadata.ID || descriptor.Version != metadata.PluginVersion {
-		return Result{}, errors.New("embedded runner identity differs from runtime descriptor")
+	declared, err := decodeDescriptor[runnerDeclaration](metadata.Descriptor)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := declared.matches(descriptor); err != nil {
+		return Result{}, err
 	}
 	// A generic checker has no vendor dataset. Missing evidence must still produce
 	// a valid answer for each selector, without fetching resources during analysis.
@@ -75,6 +79,6 @@ func validateRunnerComponent(ctx context.Context, component *componenthost.Plugi
 			}
 		}
 	}
-	return Result{Kind: "component", PluginID: descriptor.Name, Rules: []string{}, HostCommit: HostCommit,
+	return Result{Kind: "component", PluginID: metadata.ID, Rules: []string{}, HostCommit: HostCommit,
 		Checks: []string{"host-wit-contract", "runner-provider", "runner-descriptor", "missing-snapshot", "repeated-sample"}}, nil
 }
