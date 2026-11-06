@@ -125,7 +125,7 @@ func TestCoreStaticRuntimeMismatch(t *testing.T) {
 
 func TestEmptyRequiredInputsAreEquivalent(t *testing.T) {
 	descriptor := rule.Descriptor{Name: "example", Description: "Example"}
-	declared := componentDeclaration{Descriptor: descriptor, RequiredInputs: []checkinputs.InputKind{}}
+	declared := componentDeclaration{Descriptor: descriptor, RequiredInputs: []rule.InputKind{}}
 	if err := declared.matches(checkinputs.Descriptor{Descriptor: descriptor}); err != nil {
 		t.Fatal(err)
 	}

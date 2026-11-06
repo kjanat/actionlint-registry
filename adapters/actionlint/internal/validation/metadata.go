@@ -34,10 +34,10 @@ func supportedComponent(iface string) bool {
 	}
 }
 
-// componentDeclaration uses the host's declaration types with the metadata JSON field names.
+// componentDeclaration maps host metadata to the component protocol's JSON fields.
 type componentDeclaration struct {
 	rule.Descriptor
-	RequiredInputs []checkinputs.InputKind `json:"required_inputs"`
+	RequiredInputs []rule.InputKind `json:"required_inputs"`
 }
 
 type embeddedMetadata struct {
