@@ -10,6 +10,7 @@ import (
 	checking "actionlint.kjanat.dev/v2/internal/checking"
 	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
 	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	"actionlint.kjanat.dev/v2/internal/checking/scripts/registry"
 	"actionlint.kjanat.dev/v2/internal/input/workspace"
 	componenthost "actionlint.kjanat.dev/v2/internal/plugins/execution/component"
 	results "actionlint.kjanat.dev/v2/internal/results"
@@ -51,11 +52,11 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 		if err != nil {
 			return result, fmt.Errorf("sample invocation %d: %w", attempt+1, err)
 		}
-		if descriptor.Name == "shellcheck-rs" && !slices.ContainsFunc(findings, func(d results.Diagnostic) bool { return d.Code == "SC2086" }) {
+		if descriptor.Name == "shellcheck" && !slices.ContainsFunc(findings, func(d results.Diagnostic) bool { return d.Code == "SC2086" }) {
 			return result, errors.New("shellcheck smoke sample did not report SC2086")
 		}
 	}
-	_, err = analyzeComponent(ctx, component, emptyWorkflow, names)
+	_, err = runComponentCheck(ctx, component, emptyWorkflow, names)
 	if err != nil {
 		return result, fmt.Errorf("empty workflow: %w", err)
 	}
@@ -68,6 +69,11 @@ type checkedAnalyzer struct {
 	rules    []string
 	findings []results.Diagnostic
 	called   bool
+}
+
+type checkedToolAnalyzer struct {
+	*checkedAnalyzer
+	checkinputs.ToolIntegrator
 }
 
 func (checked *checkedAnalyzer) CheckDocument(ctx context.Context, input checkinputs.Input) ([]results.Diagnostic, error) {
@@ -86,11 +92,7 @@ func (checked *checkedAnalyzer) CheckDocument(ctx context.Context, input checkin
 // Use the host checking pipeline so option validation, rule-name collisions and
 // required inputs follow the same path as ordinary checks.
 func analyzeComponent(ctx context.Context, component checkinputs.Checker, content string, names []string) ([]results.Diagnostic, error) {
-	checked := &checkedAnalyzer{Checker: component, rules: names}
-	_, err := checking.Analyze(ctx,
-		checking.Options{Analyzers: []checkinputs.Registration{{Checker: checked}}},
-		[]workspace.Source{{Path: samplePath, Content: []byte(content)}},
-	)
+	checked, err := runComponentCheck(ctx, component, content, names)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +100,27 @@ func analyzeComponent(ctx context.Context, component checkinputs.Checker, conten
 		return nil, errors.New("application did not invoke component")
 	}
 	return checked.findings, nil
+}
+
+func runComponentCheck(ctx context.Context, component checkinputs.Checker, content string, names []string) (*checkedAnalyzer, error) {
+	checked := &checkedAnalyzer{Checker: component, rules: names}
+	options := checking.Options{Analyzers: []checkinputs.Registration{{Checker: checked}}}
+	if integrator, ok := component.(checkinputs.ToolIntegrator); ok && integrator.ToolIntegration() != nil {
+		tool := integrator.ToolIntegration().Tool
+		if !slices.Contains(registry.IDs(), tool) {
+			return nil, fmt.Errorf("unsupported tool integration %q", tool)
+		}
+		options.Tools = registry.Registrations(registry.Selections{tool: {Command: tool, ManagedOnly: true}})
+		options.Analyzers[0].Checker = checkedToolAnalyzer{checkedAnalyzer: checked, ToolIntegrator: integrator}
+	}
+	_, err := checking.Analyze(ctx,
+		options,
+		[]workspace.Source{{Path: samplePath, Content: []byte(content)}},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return checked, nil
 }
 
 type inputCollector struct {

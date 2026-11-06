@@ -78,7 +78,7 @@ type embeddedMetadata struct {
 	PluginVersion   string `json:"plugin_version"`
 	Transport       string `json:"transport"`
 	Interface       string `json:"interface"`
-	ContractSHA256  string `json:"contract_sha256"`
+	WITSHA256       string `json:"wit_sha256"`
 	Interfaces      map[string][]struct {
 		Version int    `json:"version"`
 		Export  string `json:"export"`
@@ -113,7 +113,7 @@ func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMet
 		var contract struct {
 			Transport string `json:"transport"`
 			Interface string `json:"interface"`
-			Digest    string `json:"contract_sha256"`
+			Digest    string `json:"wit_sha256"`
 		}
 		if err := jsonv2.Unmarshal(info.Metadata, &contract); err != nil {
 			return metadata, fmt.Errorf("component contract declaration: %w", err)
@@ -189,7 +189,7 @@ func (metadata embeddedMetadata) contract() string {
 	if metadata.Transport == "wasm-core-json" {
 		return "wasm-core-json/1"
 	}
-	return metadata.Interface + "#sha256=" + metadata.ContractSHA256
+	return metadata.Interface + "#sha256=" + metadata.WITSHA256
 }
 
 func (declared *componentDeclaration) matches(actual checkinputs.Descriptor) error {

@@ -143,6 +143,47 @@ type optionsAnalyzer struct {
 	called bool
 }
 
+type managedAnalyzer struct {
+	called, negotiated bool
+}
+
+func (*managedAnalyzer) Descriptor() checkinputs.Descriptor {
+	return checkinputs.Descriptor{
+		Name: "shellcheck", Description: "Exercise managed tool admission", Category: "correctness",
+		RequiredInputs: []rule.InputKind{rule.Scripts, rule.Invocations}}
+}
+
+func (*managedAnalyzer) ToolIntegration() *checkinputs.ToolIntegration {
+	return &checkinputs.ToolIntegration{Tool: "shellcheck", Contract: "kjanat:actionlint/shellcheck-config@0.1.0", ConfigurationSchema: `{"type":"object"}`}
+}
+
+func (candidate *managedAnalyzer) NegotiateTool(context.Context, json.RawMessage, json.RawMessage) (*checkinputs.ToolNegotiation, error) {
+	candidate.negotiated = true
+	return &checkinputs.ToolNegotiation{Options: json.RawMessage(`{}`)}, nil
+}
+
+func (candidate *managedAnalyzer) CheckDocument(_ context.Context, input checkinputs.Input) ([]results.Diagnostic, error) {
+	candidate.called = len(input.Scripts) != 0 && input.BuildShellScriptInput != nil
+	return nil, nil
+}
+
+func TestManagedComponentUsesToolNegotiationAndShellInputs(t *testing.T) {
+	candidate := &managedAnalyzer{}
+	if _, err := analyzeComponent(t.Context(), candidate, sampleWorkflow, []string{"shellcheck"}); err != nil {
+		t.Fatal(err)
+	}
+	if !candidate.called || !candidate.negotiated {
+		t.Fatalf("managed checker called=%v negotiated=%v", candidate.called, candidate.negotiated)
+	}
+	empty := &managedAnalyzer{}
+	if _, err := runComponentCheck(t.Context(), empty, emptyWorkflow, []string{"shellcheck"}); err != nil {
+		t.Fatal(err)
+	}
+	if empty.called {
+		t.Fatal("managed checker received an empty workflow as a script check")
+	}
+}
+
 func (candidate *optionsAnalyzer) Descriptor() checkinputs.Descriptor {
 	return checkinputs.Descriptor{Name: "registry-options-test", Description: "Exercise option registration", Category: "correctness", OptionsSchema: candidate.schema}
 }

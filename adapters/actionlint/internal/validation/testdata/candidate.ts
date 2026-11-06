@@ -77,7 +77,7 @@ async function packageFixture(output: string): Promise<void> {
 		repository: 'https://github.com/example/plugin',
 		plugin_version: '1.0.0',
 		interface: 'kjanat:actionlint/analyzer@0.2.0',
-		contract_sha256: '287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23',
+		wit_sha256: '287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23',
 		descriptor: {
 			name: 'no-sudo',
 			description: 'Check runner privilege assumptions',
