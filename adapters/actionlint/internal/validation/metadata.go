@@ -34,10 +34,9 @@ func supportedComponent(iface string) bool {
 	}
 }
 
-// componentDeclaration uses the host's declaration types with the metadata JSON field names.
+// componentDeclaration compares the embedded declaration with runtime describe().
 type componentDeclaration struct {
 	rule.Descriptor
-	RequiredInputs []checkinputs.InputKind `json:"required_inputs"`
 }
 
 type embeddedMetadata struct {
@@ -186,7 +185,7 @@ func (declared *componentDeclaration) matches(actual checkinputs.Descriptor) err
 	if err != nil {
 		return err
 	}
-	observed, err := json.Marshal(componentDeclaration{Descriptor: actual.Descriptor, RequiredInputs: actual.RequiredInputs})
+	observed, err := json.Marshal(componentDeclaration{Descriptor: actual.Descriptor})
 	if err != nil {
 		return err
 	}

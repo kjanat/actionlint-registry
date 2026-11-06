@@ -102,9 +102,9 @@ type inputCollector struct {
 }
 
 func (collector *inputCollector) Descriptor() checkinputs.Descriptor {
-	return checkinputs.Descriptor{Descriptor: collector.descriptor, RequiredInputs: []checkinputs.InputKind{
-		checkinputs.Source, checkinputs.Scripts, checkinputs.Mappings, checkinputs.Invocations, checkinputs.Execution, checkinputs.Dependencies,
-	}}
+	descriptor := collector.descriptor
+	descriptor.RequiredInputs = []rule.InputKind{rule.Source, rule.Scripts, rule.Mappings, rule.Invocations, rule.Execution, rule.Dependencies}
+	return checkinputs.Descriptor{Descriptor: descriptor}
 }
 
 func (collector *inputCollector) CheckDocument(_ context.Context, input checkinputs.Input) ([]results.Diagnostic, error) {

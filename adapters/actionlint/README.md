@@ -17,7 +17,7 @@ report to stdout. Run it through the registry's `check` command to verify the
 accepted artifact's checksum, isolate inherited credentials, and store the report.
 The process boundary does not provide an operating-system sandbox.
 
-The checker uses actionlint v2 at `99a250b29aaadfdb2d95a0c6ab954d3f9f11bdc8`.
+The checker uses actionlint v2 at `6288ee5f7f09f5a2b2de9ca69602bc91726fcf39`.
 It supports core ABI 1 and the analyzer, script-engine and runner-provider WIT roles.
 The host validates exported component types. A WIT source checksum also covers
 documentation comments, so a different checksum alone does not reject an analyzer.

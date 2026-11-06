@@ -21,7 +21,7 @@ import (
 	corewasm "actionlint.kjanat.dev/v2/internal/plugins/execution/module"
 )
 
-const HostCommit = "99a250b29aaadfdb2d95a0c6ab954d3f9f11bdc8"
+const HostCommit = "6288ee5f7f09f5a2b2de9ca69602bc91726fcf39"
 
 const callTimeout = 10 * time.Second
 
