@@ -34,10 +34,9 @@ func supportedComponent(iface string) bool {
 	}
 }
 
-// componentDeclaration maps host metadata to the component protocol's JSON fields.
+// componentDeclaration compares embedded metadata with the host's rule declaration.
 type componentDeclaration struct {
 	rule.Descriptor
-	RequiredInputs []rule.InputKind `json:"required_inputs"`
 }
 
 type embeddedMetadata struct {
@@ -186,7 +185,7 @@ func (declared *componentDeclaration) matches(actual checkinputs.Descriptor) err
 	if err != nil {
 		return err
 	}
-	observed, err := json.Marshal(componentDeclaration{Descriptor: actual.Descriptor, RequiredInputs: actual.RequiredInputs})
+	observed, err := json.Marshal(componentDeclaration{Descriptor: actual.Descriptor})
 	if err != nil {
 		return err
 	}
