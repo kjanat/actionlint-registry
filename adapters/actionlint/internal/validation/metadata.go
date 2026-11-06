@@ -145,8 +145,8 @@ func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMet
 		if metadata.Interface != componentInterface {
 			break
 		}
-		if metadata.Descriptor == nil || metadata.Descriptor.Name != metadata.ID {
-			return metadata, errors.New("embedded component metadata requires a descriptor matching its id")
+		if metadata.Descriptor == nil {
+			return metadata, errors.New("embedded component metadata requires a rule descriptor")
 		}
 		// Reject unsupported descriptor members instead of dropping contract data.
 		var fields map[string]json.RawMessage

@@ -55,7 +55,7 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 	if err != nil {
 		return result, fmt.Errorf("empty workflow: %w", err)
 	}
-	return Result{Kind: "component", PluginID: descriptor.Name, Rules: names,
+	return Result{Kind: "component", PluginID: metadata.ID, Rules: names,
 		Checks: []string{"host-wit-contract", "rule-descriptors", "application-registration", "default-config", "repeated-sample", "diagnostic-ranges", "empty-workflow"}, HostCommit: HostCommit}, nil
 }
 
