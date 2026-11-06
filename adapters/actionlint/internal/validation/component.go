@@ -35,7 +35,11 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 		return result, errors.New("component does not implement its declared analyzer role")
 	}
 	descriptor := component.Descriptor()
-	if err := metadata.Descriptor.matches(descriptor); err != nil {
+	declared, err := decodeDescriptor[componentDeclaration](metadata.Descriptor)
+	if err != nil {
+		return result, err
+	}
+	if err := declared.matches(descriptor); err != nil {
 		return result, err
 	}
 	names, err := ruleNames([]rule.Descriptor{descriptor.Descriptor})

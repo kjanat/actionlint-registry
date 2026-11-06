@@ -10,12 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
 
 	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	runner "actionlint.kjanat.dev/v2/internal/model/runners/contract"
 )
 
 // ErrUnsupportedContract identifies a contract version this checker does not implement.
@@ -39,6 +41,32 @@ type componentDeclaration struct {
 	rule.Descriptor
 }
 
+type runnerDeclaration struct {
+	Name    string   `json:"name"`
+	Version string   `json:"version"`
+	Targets []string `json:"targets"`
+}
+
+func (declared runnerDeclaration) matches(actual runner.Descriptor) error {
+	declaredTargets := slices.Sorted(slices.Values(declared.Targets))
+	actualTargets := slices.Sorted(slices.Values(actual.Targets))
+	if declared.Name != actual.Name || declared.Version != actual.Version || !slices.Equal(declaredTargets, actualTargets) {
+		return errors.New("embedded runner descriptor differs from runtime describe()")
+	}
+	return nil
+}
+
+func decodeDescriptor[T any](data json.RawMessage) (T, error) {
+	var value T
+	if len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return value, errors.New("embedded component metadata requires a descriptor")
+	}
+	if err := jsonv2.Unmarshal(data, &value, jsonv2.RejectUnknownMembers(true)); err != nil {
+		return value, fmt.Errorf("embedded component descriptor: %w", err)
+	}
+	return value, nil
+}
+
 type embeddedMetadata struct {
 	MetadataVersion int    `json:"metadata_version"`
 	ABIVersion      int    `json:"abi_version"`
@@ -58,8 +86,8 @@ type embeddedMetadata struct {
 	Capabilities struct {
 		ConfigSchema bool `json:"config_schema"`
 	} `json:"capabilities"`
-	ConfigSchema json.RawMessage       `json:"config_schema"`
-	Descriptor   *componentDeclaration `json:"descriptor"`
+	ConfigSchema json.RawMessage `json:"config_schema"`
+	Descriptor   json.RawMessage `json:"descriptor"`
 }
 
 func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMetadata, error) {
@@ -141,19 +169,15 @@ func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMet
 			}
 		}
 	case pluginartifact.Component:
-		if metadata.Interface != componentInterface {
-			break
-		}
-		if metadata.Descriptor == nil {
-			return metadata, errors.New("embedded component metadata requires a rule descriptor")
-		}
-		// Reject unsupported descriptor members instead of dropping contract data.
-		var fields map[string]json.RawMessage
-		if err := jsonv2.Unmarshal(info.Metadata, &fields); err != nil {
-			return metadata, err
-		}
-		if err := jsonv2.Unmarshal(fields["descriptor"], metadata.Descriptor, jsonv2.RejectUnknownMembers(true)); err != nil {
-			return metadata, fmt.Errorf("embedded component descriptor: %w", err)
+		switch metadata.Interface {
+		case componentInterface:
+			if _, err := decodeDescriptor[componentDeclaration](metadata.Descriptor); err != nil {
+				return metadata, err
+			}
+		case runnerInterface:
+			if _, err := decodeDescriptor[runnerDeclaration](metadata.Descriptor); err != nil {
+				return metadata, err
+			}
 		}
 	default:
 		return metadata, errors.New("unsupported artifact kind")
