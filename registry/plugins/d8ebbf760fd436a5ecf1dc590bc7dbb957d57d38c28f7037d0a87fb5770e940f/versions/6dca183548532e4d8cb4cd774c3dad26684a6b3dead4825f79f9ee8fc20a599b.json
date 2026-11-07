@@ -1,0 +1,184 @@
+{
+  "record_version": 2,
+  "artifact": {
+    "kind": "component",
+    "sha256": "23e924599d6e4b91c2aeb995e7759fd6bbece3aeaeccf7a3e9f7428c527ec13f",
+    "plugin_id": "shellcheck-rs",
+    "plugin_version": "0.3.0",
+    "repository": "https://github.com/kjanat/actionlint-plugin-shellcheck",
+    "contract": "kjanat:actionlint/analyzer@0.2.0#sha256=287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23",
+    "metadata": {
+      "capabilities": {
+        "filesystem": true,
+        "fixes": true,
+        "network": false,
+        "source_annotations": true,
+        "source_files": true
+      },
+      "description": "ShellCheck for actionlint run steps as a WebAssembly component, built on shellcheck-rs",
+      "descriptor": {
+        "category": "correctness",
+        "description": "ShellCheck for actionlint run steps as a WebAssembly component, built on shellcheck-rs",
+        "documentation_url": "https://github.com/kjanat/actionlint-plugin-shellcheck",
+        "explanation": "Checks supported shell snippets with shellcheck-rs. External sources require read-only host grants; rc files are not read. Fixes require review.",
+        "help": "Configure shell, disable, enable, extended-analysis and severity under lint.rules.plugins.shellcheck.options.",
+        "maturity": "",
+        "name": "shellcheck",
+        "options_schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "disable": {
+              "description": "Diagnostic codes to suppress, with optional SC prefix; these are not optional-check names.",
+              "examples": [
+                [
+                  "SC2086",
+                  "2154"
+                ]
+              ],
+              "items": {
+                "pattern": "^(SC)?[0-9]+$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "enable": {
+              "description": "Optional checks to activate by exact name, or all. Numeric diagnostic codes are not accepted.",
+              "examples": [
+                [
+                  "require-variable-braces",
+                  "clarify-parse-errors"
+                ],
+                [
+                  "all"
+                ]
+              ],
+              "items": {
+                "enum": [
+                  "all",
+                  "clarify-parse-errors",
+                  "add-default-case",
+                  "avoid-negated-conditions",
+                  "avoid-nullary-conditions",
+                  "check-extra-masked-returns",
+                  "check-set-e-suppressed",
+                  "check-unassigned-uppercase",
+                  "deprecate-which",
+                  "quote-safe-variables",
+                  "require-double-brackets",
+                  "require-double-equals",
+                  "require-variable-braces",
+                  "useless-use-of-cat"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "extended-analysis": {
+              "type": "boolean"
+            },
+            "external-sources": {
+              "description": "Follow sources only within read-only filesystem grants supplied by the host.",
+              "type": "boolean"
+            },
+            "severity": {
+              "enum": [
+                "error",
+                "warning",
+                "info",
+                "style"
+              ],
+              "type": "string"
+            },
+            "shell": {
+              "description": "Override an already supported shell's inferred dialect, unless a header directive selects one.",
+              "enum": [
+                "bash",
+                "sh",
+                "dash",
+                "ksh",
+                "busybox"
+              ],
+              "type": "string"
+            },
+            "source-path": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "title": "ShellCheck plugin options",
+          "type": "object"
+        },
+        "provider": "shellcheck-rs",
+        "recommended": true,
+        "required_inputs": [
+          "scripts",
+          "invocations",
+          "execution"
+        ],
+        "subcategory": "scripts"
+      },
+      "engine": {
+        "name": "shellcheck-rs",
+        "version": "1.0.0"
+      },
+      "id": "shellcheck-rs",
+      "interface": "kjanat:actionlint/analyzer@0.2.0",
+      "languages": [
+        "shell"
+      ],
+      "license": "GPL-3.0-or-later",
+      "metadata_version": 1,
+      "name": "ShellCheck",
+      "plugin_version": "0.3.0",
+      "repository": "https://github.com/kjanat/actionlint-plugin-shellcheck",
+      "transport": "wasm-component",
+      "wit_sha256": "287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23"
+    }
+  },
+  "submission": {
+    "schema_version": 1,
+    "provider": "github",
+    "repository": "kjanat/actionlint-plugin-shellcheck",
+    "tag": "v0.3.0",
+    "asset": "plugin.wasm",
+    "sha256": "23e924599d6e4b91c2aeb995e7759fd6bbece3aeaeccf7a3e9f7428c527ec13f",
+    "kind": "component"
+  },
+  "receipt": {
+    "schema_version": 1,
+    "id": "eaf6db4a-51d2-4ebd-be31-2e2464a7baa8",
+    "submission": {
+      "schema_version": 1,
+      "provider": "github",
+      "repository": "kjanat/actionlint-plugin-shellcheck",
+      "tag": "v0.3.0",
+      "asset": "plugin.wasm",
+      "sha256": "23e924599d6e4b91c2aeb995e7759fd6bbece3aeaeccf7a3e9f7428c527ec13f",
+      "kind": "component"
+    },
+    "identity": {
+      "issuer": "https://token.actions.githubusercontent.com",
+      "subject": "repo:kjanat@6353477/actionlint-plugin-shellcheck@1422095402:ref:refs/tags/v0.3.0",
+      "repository_id": "1422095402",
+      "owner_id": "6353477",
+      "repository": "kjanat/actionlint-plugin-shellcheck",
+      "ref": "refs/tags/v0.3.0",
+      "commit": "4ca5a4899199603110c9df5d5181f80e767866eb",
+      "workflow": "kjanat/actionlint-plugin-shellcheck/.github/workflows/release.yml@refs/tags/v0.3.0",
+      "run_id": "42316916433:1"
+    },
+    "authorized_at": "2026-11-07T00:17:51Z"
+  },
+  "owner_id": 6353477,
+  "upstream_immutable": true,
+  "repository_id": 1422095402,
+  "release_id": 437203626,
+  "asset_id": 719051597,
+  "commit": "4ca5a4899199603110c9df5d5181f80e767866eb",
+  "url": "https://github.com/kjanat/actionlint-plugin-shellcheck/releases/download/v0.3.0/plugin.wasm",
+  "published_at": "2026-11-07T00:17:50Z",
+  "accepted_at": "2026-11-07T00:18:36.352228304Z"
+}
