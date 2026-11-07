@@ -97,16 +97,25 @@ func declaration(kind string, data []byte) (Declaration, error) {
 		contract = m.Transport + "/" + strconv.FormatUint(uint64(core.ABI), 10)
 	case "component":
 		var component struct {
-			Interface string `json:"interface"`
-			Digest    string `json:"contract_sha256"`
+			Interface       string `json:"interface"`
+			WITSHA256       string `json:"wit_sha256"`
+			LegacyWITSHA256 string `json:"contract_sha256"`
 		}
 		if err := jsonv2.Unmarshal(data, &component); err != nil {
 			return Declaration{}, err
 		}
-		if m.Transport != "wasm-component" || !text(component.Interface, 512) || !checksum.MatchString(component.Digest) {
-			return Declaration{}, errors.New("component declaration requires an interface and contract checksum")
+		if component.WITSHA256 != "" && component.LegacyWITSHA256 != "" && component.WITSHA256 != component.LegacyWITSHA256 {
+			return Declaration{}, errors.New("component metadata declares conflicting WIT checksums")
 		}
-		contract = component.Interface + "#sha256=" + component.Digest
+		// Published releases used contract_sha256 before the field was renamed.
+		witSHA256 := component.WITSHA256
+		if witSHA256 == "" {
+			witSHA256 = component.LegacyWITSHA256
+		}
+		if m.Transport != "wasm-component" || !text(component.Interface, 512) || !checksum.MatchString(witSHA256) {
+			return Declaration{}, errors.New("component declaration requires an interface and WIT checksum")
+		}
+		contract = component.Interface + "#sha256=" + witSHA256
 	case "manifest":
 		if m.Transport != "process" {
 			return Declaration{}, errors.New("process declaration requires process transport")
