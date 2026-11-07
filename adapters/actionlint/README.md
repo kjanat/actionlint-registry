@@ -17,8 +17,10 @@ report to stdout. Run it through the registry's `check` command to verify the
 accepted artifact's checksum, isolate inherited credentials, and store the report.
 The process boundary does not provide an operating-system sandbox.
 
-The checker uses actionlint v2 at `70c824363f307a5097e73531d18d00189cca6fe8`.
-It supports core ABI 1 and the analyzer, script-engine and runner-provider WIT roles.
+The checker uses actionlint v2 at `afaa8f8a5c537d0e718d6a9045c7b81c45811c61`.
+It supports core ABI 1, analyzer and runner-provider WIT roles at 0.2.0, and
+script-engine at 0.2.0 and 0.3.0. A template-effects extension must match its
+script-engine version.
 The host validates exported component types. A WIT source checksum also covers
 documentation comments, so a different checksum alone does not reject an analyzer.
 Script engines validate default options and repeated diagnostic calls. Runner

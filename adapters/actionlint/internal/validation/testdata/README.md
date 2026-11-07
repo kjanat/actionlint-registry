@@ -23,3 +23,7 @@ The host can load `core-echo.wasm`, but this checker rejects it because it omits
 rule descriptors. The tests in `core_fixture_test.go` generate core fixtures that
 can pass validation. One uses Ruff's registration format to test the bundled
 backend without generic shell selectors.
+
+The `component-script-0.3.0.wasm` and `component-template-script-0.3.0.wasm`
+fixtures come from the corresponding files in `internal/plugins/execution/component/testdata/plugins`
+at [actionlint afaa8f8a5c537d0e718d6a9045c7b81c45811c61](https://github.com/kjanat/actionlint/tree/afaa8f8a5c537d0e718d6a9045c7b81c45811c61).

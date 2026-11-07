@@ -25,11 +25,12 @@ var ErrUnsupportedContract = errors.New("contract is not supported by this check
 
 const componentInterface = "kjanat:actionlint/analyzer@0.2.0"
 const scriptInterface = "kjanat:actionlint/script-engine@0.2.0"
+const scriptInterface03 = "kjanat:actionlint/script-engine@0.3.0"
 const runnerInterface = "kjanat:actionlint/runner-provider@0.2.0"
 
 func supportedComponent(iface string) bool {
 	switch iface {
-	case componentInterface, scriptInterface, runnerInterface:
+	case componentInterface, scriptInterface, scriptInterface03, runnerInterface:
 		return true
 	default:
 		return false

@@ -32,7 +32,7 @@ func validateScriptComponent(ctx context.Context, component *componenthost.Plugi
 	if err := component.ValidateConfig(ctx, nil); err != nil {
 		return Result{}, fmt.Errorf("default configuration: %w", err)
 	}
-	request := checkinputs.ScriptRequest{Source: "\n", Filename: "registry-smoke.txt"}
+	request := checkinputs.ScriptRequest{Source: "x\n", Filename: "registry-smoke.txt"}
 	if slices.Contains(descriptor.Shells, "python") || descriptor.Engine == "ruff" {
 		request.Source, request.Filename = "print(missing)\n", "registry-smoke.py"
 	}

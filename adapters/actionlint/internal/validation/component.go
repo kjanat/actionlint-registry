@@ -27,7 +27,7 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 	}
 	defer func() { err = errors.Join(err, component.Close(context.WithoutCancel(ctx))) }()
 	switch metadata.Interface {
-	case scriptInterface:
+	case scriptInterface, scriptInterface03:
 		return validateScriptComponent(ctx, component)
 	case runnerInterface:
 		return validateRunnerComponent(ctx, component, metadata)
