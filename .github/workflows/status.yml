@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { ref: master, persist-credentials: false }
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with: { bun-version-file: "package.json", no-cache: true }
+        with: { no-cache: true }
       - name: Install registry tooling
         run: bun install --frozen-lockfile
       - name: Authorize administrator and record trusted actor
