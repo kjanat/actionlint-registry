@@ -1,6 +1,7 @@
 [tools]
 node                                      = "26.13.0"
 bun                                       = "latest"
+golangci-lint                             = "2.15.0"
 "github:kjanat/dprint"                    = "latest"
 "github:kjanat/runner"                    = "latest"
 "github:kjanat/shellcheck-rs"             = { version = "latest", rename_exe = "shellcheck" }

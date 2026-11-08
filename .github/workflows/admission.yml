@@ -30,7 +30,7 @@ jobs:
           ref: master
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with: { bun-version-file: ".tool-versions", no-cache: true }
+        with: { bun-version-file: "package.json", no-cache: true }
       - name: Install registry tooling
         run: bun install --frozen-lockfile
       - name: Claim authenticated publisher request
@@ -190,7 +190,7 @@ jobs:
           name: validated-submission
           path: accepted
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with: { bun-version-file: ".tool-versions", no-cache: true }
+        with: { bun-version-file: "package.json", no-cache: true }
       - name: Install registry tooling
         run: bun install --frozen-lockfile
       # Published means the accepted record reached Pages, not merely a Git commit.
@@ -220,7 +220,7 @@ jobs:
           path: reports
           merge-multiple: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with: { bun-version-file: ".tool-versions", no-cache: true }
+        with: { bun-version-file: "package.json", no-cache: true }
       - name: Install registry tooling
         run: bun install --frozen-lockfile
       # Bound to the claiming workflow run; stale runs cannot release a newer lease.
