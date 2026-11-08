@@ -67,7 +67,7 @@ func text(s string, max int) bool {
 	return true
 }
 
-func declaration(kind string, data []byte) (Declaration, error) {
+func declaration(kind string, data []byte, accepted bool) (Declaration, error) {
 	var m metadata
 	if len(data) == 0 || len(data) > MaxMetadata {
 		return Declaration{}, errors.New("plugin metadata is missing or too large")
@@ -104,10 +104,10 @@ func declaration(kind string, data []byte) (Declaration, error) {
 		if err := jsonv2.Unmarshal(data, &component); err != nil {
 			return Declaration{}, err
 		}
-		if component.WITSHA256 != "" && component.LegacyWITSHA256 != "" && component.WITSHA256 != component.LegacyWITSHA256 {
-			return Declaration{}, errors.New("component metadata declares conflicting WIT checksums")
+		if component.LegacyWITSHA256 != "" && (!accepted || component.WITSHA256 != "") {
+			return Declaration{}, errors.New("component metadata must declare wit_sha256 instead of contract_sha256")
 		}
-		// Published releases used contract_sha256 before the field was renamed.
+		// Records accepted before the wit_sha256 rename keep their immutable metadata.
 		witSHA256 := component.WITSHA256
 		if witSHA256 == "" {
 			witSHA256 = component.LegacyWITSHA256
@@ -128,7 +128,7 @@ func declaration(kind string, data []byte) (Declaration, error) {
 }
 
 func (d Declaration) Validate() error {
-	parsed, err := declaration(d.Kind, d.Metadata)
+	parsed, err := declaration(d.Kind, d.Metadata, true)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func Inspect(ctx context.Context, path string) (result Declaration, err error) {
 		if manifest.SchemaVersion != 1 || manifest.Transport != "process" {
 			return result, errors.New("process manifest requires schema_version 1 and process transport")
 		}
-		result, err = declaration("manifest", manifest.Metadata)
+		result, err = declaration("manifest", manifest.Metadata, false)
 		if err == nil && (manifest.ID != result.PluginID || manifest.Version != result.PluginVersion) {
 			err = errors.New("process manifest identity disagrees with discovery metadata")
 		}
@@ -275,7 +275,7 @@ func Inspect(ctx context.Context, path string) (result Declaration, err error) {
 			return result, errors.New("empty actionlint.plugin custom section")
 		}
 	}
-	result, err = declaration(kind, embedded)
+	result, err = declaration(kind, embedded, false)
 	if err != nil {
 		return result, err
 	}

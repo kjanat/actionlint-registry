@@ -34,7 +34,7 @@ func custom(name string, data []byte) []byte {
 func declarationJSON(kind string) []byte {
 	contract := `"abi_version":999,"transport":"wasm-core-json"`
 	if kind == "component" {
-		contract = `"transport":"wasm-component","interface":"example:future/analyzer@9.0.0","contract_sha256":"` + strings.Repeat("a", 64) + `"`
+		contract = `"transport":"wasm-component","interface":"example:future/analyzer@9.0.0","wit_sha256":"` + strings.Repeat("a", 64) + `"`
 	}
 	return []byte(`{"metadata_version":1,"id":"example","name":"Example","description":"A plugin","license":"MIT","repository":"https://github.com/owner/plugin","plugin_version":"1.0.0",` + contract + `,"descriptor":{"requires":{"future":"shape"}},"future":{"number":9007199254740993,"descriptor":{"new-fact":true}}}`)
 }
@@ -54,24 +54,36 @@ func inspectBytes(t *testing.T, data []byte) (Declaration, error) {
 	return Inspect(t.Context(), path)
 }
 
-func TestComponentWITChecksumFieldsPreserveMetadata(t *testing.T) {
-	legacy := declarationJSON("component")
-	current := bytes.ReplaceAll(legacy, []byte("contract_sha256"), []byte("wit_sha256"))
-	for _, metadata := range [][]byte{legacy, current} {
-		result, err := inspectBytes(t, wasm("component", metadata))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(result.Metadata, metadata) || result.Contract != "example:future/analyzer@9.0.0#sha256="+strings.Repeat("a", 64) {
-			t.Fatalf("changed released metadata or WIT identity: %+v", result)
-		}
-		if err := result.Validate(); err != nil {
-			t.Fatal(err)
+func TestAdmissionRequiresWITChecksumField(t *testing.T) {
+	current := declarationJSON("component")
+	result, err := inspectBytes(t, wasm("component", current))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(result.Metadata, current) || result.Contract != "example:future/analyzer@9.0.0#sha256="+strings.Repeat("a", 64) {
+		t.Fatalf("changed released metadata or WIT identity: %+v", result)
+	}
+	if err := result.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	legacy := bytes.ReplaceAll(current, []byte("wit_sha256"), []byte("contract_sha256"))
+	both := bytes.ReplaceAll(current, []byte(`"wit_sha256":`), []byte(`"contract_sha256":"`+strings.Repeat("a", 64)+`","wit_sha256":`))
+	for _, metadata := range [][]byte{legacy, both} {
+		if _, err := inspectBytes(t, wasm("component", metadata)); err == nil {
+			t.Fatalf("admitted contract_sha256: %s", metadata)
 		}
 	}
-	conflicting := bytes.ReplaceAll(legacy, []byte(`"contract_sha256":`), []byte(`"wit_sha256":"`+strings.Repeat("b", 64)+`","contract_sha256":`))
-	if _, err := inspectBytes(t, wasm("component", conflicting)); err == nil {
-		t.Fatal("accepted conflicting WIT checksums")
+}
+
+func TestAcceptedLegacyRecordsRemainValid(t *testing.T) {
+	legacy := bytes.ReplaceAll(declarationJSON("component"), []byte("wit_sha256"), []byte("contract_sha256"))
+	record := Declaration{Kind: "component", SHA256: strings.Repeat("d", 64), PluginID: "example", PluginVersion: "1.0.0", Repository: "https://github.com/owner/plugin", Contract: "example:future/analyzer@9.0.0#sha256=" + strings.Repeat("a", 64), Metadata: legacy}
+	if err := record.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	record.Metadata = bytes.ReplaceAll(declarationJSON("component"), []byte(`"wit_sha256":`), []byte(`"contract_sha256":"`+strings.Repeat("a", 64)+`","wit_sha256":`))
+	if err := record.Validate(); err == nil {
+		t.Fatal("accepted a record declaring both checksum fields")
 	}
 }
 func TestUnknownContractsRemainDeclarations(t *testing.T) {

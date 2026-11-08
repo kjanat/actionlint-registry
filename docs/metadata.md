@@ -39,7 +39,8 @@ contract. Admission does not require the registry's checker to support that ABI.
 ## Components
 
 Set `transport` to `"wasm-component"`, `interface` to the interface identity, and
-`contract_sha256` to the lowercase SHA-256 checksum of the canonical contract.
+`wit_sha256` to the lowercase SHA-256 checksum of the canonical WIT.
+Admission rejects `contract_sha256`.
 These are declarations. A compatible host's checker verifies the exported types;
 admission reads the declaration without instantiating the component.
 
@@ -56,7 +57,7 @@ For example, a component can declare:
   "plugin_version": "1.0.0",
   "transport": "wasm-component",
   "interface": "example:checks/analyzer@2.0.0",
-  "contract_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "wit_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "descriptor": {
     "name": "example-check",
     "future_fact": "workflow-declarations"

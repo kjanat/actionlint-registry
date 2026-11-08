@@ -166,7 +166,7 @@ test('recovery accepts large stored records while bounding reports and leases se
 		plugin_version: '1.0.0',
 		transport: 'wasm-component',
 		interface: 'kjanat:actionlint/analyzer@0.1.0',
-		contract_sha256: 'b'.repeat(64),
+		wit_sha256: 'b'.repeat(64),
 		options_schema: { description: 'x'.repeat(1024 * 1024 - 1024) },
 	};
 	assert.ok(Buffer.byteLength(JSON.stringify(metadata)) < 1024 * 1024);
@@ -191,7 +191,7 @@ test('recovery accepts large stored records while bounding reports and leases se
 			plugin_id: 'example',
 			plugin_version: '1.0.0',
 			repository: metadata.repository,
-			contract: `${metadata.interface}#sha256=${metadata.contract_sha256}`,
+			contract: `${metadata.interface}#sha256=${metadata.wit_sha256}`,
 			sha256: submission.sha256,
 			metadata,
 		},
