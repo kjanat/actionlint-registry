@@ -153,7 +153,14 @@ jobs:
           gh auth setup-git
           git add -- registry/plugins
           if ! git diff --cached --quiet; then
-            git commit -m 'chore(registry): accept validated plugin release'
+            releases="$(git diff --cached --name-only --diff-filter=A -z -- registry/plugins \
+              | xargs -0 jq -r 'select(.submission) | "\(.artifact.plugin_id // .validation.plugin_id)@\(.submission.tag)"' \
+              | sort -u | paste -sd ' ')"
+            if [[ -z "$releases" ]]; then
+              printf '%s\n' 'Accepted records name no plugin release.' >&2
+              exit 1
+            fi
+            git commit -m "chore(registry): accept ${releases// /, }"
             git push origin HEAD:refs/heads/master
           fi
   pages:
