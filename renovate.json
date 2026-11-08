@@ -14,6 +14,23 @@
       "prBodyNotes": [
         "The checker reports the host revision from adapters/actionlint/go.mod and its tests load fixtures from that revision. A changed WIT contract needs matching constants in adapters/actionlint/internal/validation."
       ]
+    },
+    {
+      "description": "Update golangci-lint in mise.toml and .golangci-lint-version together.",
+      "matchDepNames": ["golangci-lint"],
+      "groupName": "golangci-lint"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update the golangci-lint version that golangci-lint-action reads.",
+      "managerFilePatterns": ["/^\\.golangci-lint-version$/"],
+      "matchStrings": ["^(?<currentValue>\\S+)"],
+      "depNameTemplate": "golangci-lint",
+      "packageNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
     }
   ]
 }
