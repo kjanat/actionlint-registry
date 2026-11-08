@@ -141,7 +141,7 @@ change the package bytes without a version bump still test installation and beha
 | `allow-config-processes` | Explicit consent for native process fixture checks, default `false`         |
 | `tag`, `repository`      | Existing tag and its public repository, defaulting to the workflow context  |
 | `kind`                   | `core`, `component`, or `manifest`, default `component`                     |
-| `notes-file`             | Optional UTF-8 release notes                                                |
+| `notes-file`             | UTF-8 release notes; defaults to the tag's `CHANGELOG.md` section           |
 | `receipt`                | Publication progress file, default `publication.json`                       |
 | `timeout-seconds`        | Publication wait budget, default 1800                                       |
 
