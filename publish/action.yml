@@ -93,8 +93,8 @@ runs:
         if [[ -z "$NOTES_FILE" && -f CHANGELOG.md ]]; then
           NOTES_FILE="$(mktemp)"
           trap 'rm -f -- "$NOTES_FILE"' EXIT
-          awk -v heading="## [${PLUGIN_TAG#v}]" \
-            'index($0, heading) == 1 { found = 1; next } found && (/^## \[/ || /^\[[^]]+\]: /) { exit } found { print }' \
+          awk -v version="${PLUGIN_TAG#v}" \
+            'index($0, "## [" version "]") == 1 || index($0, "## [v" version "]") == 1 { found = 1; next } found && (/^## \[/ || /^\[[^]]+\]: /) { exit } found { print }' \
             CHANGELOG.md >"$NOTES_FILE"
           if ! grep -q '[^[:space:]]' "$NOTES_FILE"; then
             printf 'CHANGELOG.md has no section for %s.\n' "${PLUGIN_TAG#v}" >&2
