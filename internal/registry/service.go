@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"registry.actionlint.kjanat.dev/internal/artifact"
+	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
 
 type Inspector func(context.Context, string) (artifact.Declaration, error)
@@ -63,6 +64,7 @@ type Service struct {
 	Providers  map[string]ReleaseProvider
 	Inspect    Inspector
 	InspectOCI func(context.Context, string) (artifact.Declaration, error)
+	Checker    string
 }
 
 func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt) (Entry, error) {
@@ -125,6 +127,13 @@ func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt)
 		result, err = inspect(ctx, path)
 		if err == nil && result.Kind == "manifest" {
 			err = validateStandaloneProcess(path)
+		}
+		if err == nil && service.Checker != "" {
+			var evidence compatibility.Evidence
+			evidence, err = CheckArtifact(ctx, service.Checker, path, s.Digest())
+			if err == nil && evidence.Report.Outcome == "failed" {
+				err = reject("compatibility check failed: " + evidence.Report.Detail)
+			}
 		}
 		return result, err
 	}()

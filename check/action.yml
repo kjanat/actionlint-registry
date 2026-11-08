@@ -82,7 +82,12 @@ runs:
         if [[ -n "$KIND" ]]; then kind_args+=(--kind "$KIND"); fi
         layout_args=()
         if [[ -n "$OCI_LAYOUT" ]]; then layout_args+=(--oci-layout "$OCI_LAYOUT"); fi
+        checker_args=()
+        if [[ -z "$OCI" ]]; then
+          go -C "$ACTION_PATH/../adapters/actionlint" build -trimpath -o "$tools/checker" .
+          checker_args+=(--checker "$tools/checker")
+        fi
         bash "$ACTION_PATH/../scripts/validate.sh" bun "$ACTION_PATH/../scripts/cli.ts" check \
           --registry "$tools/registry" --actionlint "$ACTIONLINT" \
           --artifact "$ARTIFACT" --oci "$OCI" --fixture "$FIXTURE" \
-          --store "$store" --report "$REPORT" "${kind_args[@]}" "${consent[@]}" "${layout_args[@]}"
+          --store "$store" --report "$REPORT" "${checker_args[@]}" "${kind_args[@]}" "${consent[@]}" "${layout_args[@]}"

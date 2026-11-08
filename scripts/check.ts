@@ -15,6 +15,7 @@ export interface CheckOptions extends InstallationOptions {
 	registry: string;
 	artifact: string;
 	store: string;
+	checker?: string;
 	kind?: 'core' | 'component' | 'manifest';
 	ociLayout?: string;
 }
@@ -63,9 +64,31 @@ export async function checkCandidate(options: CheckOptions, run = execute, runRe
 			throw new Error('Report must not overwrite the OCI layout');
 		}
 	}
-	await prepareReport(options, [options.artifact, options.registry, ...(options.ociLayout ? [options.ociLayout] : [])]);
+	await prepareReport(options, [
+		options.artifact,
+		options.registry,
+		...(options.checker ? [options.checker] : []),
+		...(options.ociLayout ? [options.ociLayout] : []),
+	]);
 	if (options.ociLayout !== undefined && (!options.ociLayout || !options.artifact.startsWith('oci://'))) {
 		throw new Error('A local OCI layout requires a pinned --oci reference');
+	}
+	if (options.checker !== undefined && !options.artifact.startsWith('oci://')) {
+		const report = object(
+			object(
+				JSON.parse(
+					await run(
+						resolve(options.registry),
+						['check', '--checker', resolve(options.checker), '--artifact', resolve(options.artifact)],
+						process.cwd(),
+						process.env,
+					),
+				),
+			).report,
+		);
+		if (report.outcome === 'failed') {
+			throw new Error(`Registry checker rejected the candidate: ${String(report.detail)}`);
+		}
 	}
 	return verifyInstallation(options, { kind: 'candidate', options }, run, runResult);
 }
