@@ -28,7 +28,7 @@ func TestCompatibleComponent(t *testing.T) {
 }
 
 func TestComponentFindingUsesWorkflowCoordinates(t *testing.T) {
-	component, err := componenthost.Load(t.Context(), filepath.Join("testdata", "component-no-sudo.wasm"), componenthost.Options{Timeout: callTimeout, MemoryPages: 1024, ReservedRules: checking.BuiltinRuleNames()})
+	component, err := componenthost.Load(t.Context(), hostFixture(t, "component-no-sudo"), componenthost.Options{Timeout: callTimeout, MemoryPages: 1024, ReservedRules: checking.BuiltinRuleNames()})
 	if err != nil {
 		t.Fatal(err)
 	}

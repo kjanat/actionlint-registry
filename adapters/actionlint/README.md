@@ -17,7 +17,8 @@ report to stdout. Run it through the registry's `check` command to verify the
 accepted artifact's checksum, isolate inherited credentials, and store the report.
 The process boundary does not provide an operating-system sandbox.
 
-The checker uses actionlint v2 at `afaa8f8a5c537d0e718d6a9045c7b81c45811c61`.
+The checker uses the actionlint v2 revision required in `go.mod` and reports it
+from the build. Its tests load runtime fixtures from that host module.
 It supports core ABI 1, analyzer and runner-provider WIT roles at 0.2.0, and
 script-engine at 0.2.0 and 0.3.0. A template-effects extension must match its
 script-engine version.
@@ -29,5 +30,5 @@ vendor-specific snapshot behavior belongs in the publisher's candidate fixtures.
 Unknown contracts return `unsupported`; understood contracts that fail validation
 return `failed`. Neither result rejects a release from the registry.
 
-When updating the host dependency, update `HostCommit`, contract constants, and
-fixtures together. Run the module's tests and linter before using the new checker.
+A host update that changes a WIT contract needs matching contract constants. The
+module's tests and linter fail until they match.

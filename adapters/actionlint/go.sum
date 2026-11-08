@@ -1,5 +1,3 @@
-actionlint.kjanat.dev/v2 v2.0.0-20261106234842-70c824363f30 h1:Uw21C6G6iwGF3cotdmDaLCuhXm0vvvDE/TUTa6yaGOM=
-actionlint.kjanat.dev/v2 v2.0.0-20261106234842-70c824363f30/go.mod h1:+vc0m9D3aPEXcXMNDc5lbUePYFZawdTPLXNKetVLtYs=
 actionlint.kjanat.dev/v2 v2.0.0-20261107150935-afaa8f8a5c53 h1:PCvNmD/CXL4as7zYA3GXN0Vyhn3l1RuEUc9YqyQ8c48=
 actionlint.kjanat.dev/v2 v2.0.0-20261107150935-afaa8f8a5c53/go.mod h1:+vc0m9D3aPEXcXMNDc5lbUePYFZawdTPLXNKetVLtYs=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=

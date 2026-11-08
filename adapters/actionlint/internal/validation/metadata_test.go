@@ -2,9 +2,11 @@ package validation
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,11 +28,31 @@ func metadataSection(metadata string) []byte {
 // adds a missing section or manufactures declarations for submitted binaries.
 func packagedFixture(t *testing.T, name, metadata string) string {
 	t.Helper()
-	module, err := os.ReadFile(filepath.Join("testdata", name+".wasm"))
+	return appendFixtureMetadata(t, unpackagedFixture(t, name), metadata)
+}
+
+func unpackagedFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	module, err := os.ReadFile(hostFixture(t, name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return appendFixtureMetadata(t, module, metadata)
+	if len(module) < 8 {
+		t.Fatalf("%s is not a WebAssembly binary", name)
+	}
+	stripped := slices.Clone(module[:8])
+	for rest := module[8:]; len(rest) > 0; {
+		size, width := binary.Uvarint(rest[1:])
+		if width <= 0 || uint64(len(rest)-1-width) < size {
+			t.Fatalf("%s has a malformed section", name)
+		}
+		end := 1 + width + int(size)
+		if rest[0] != 0 || !bytes.HasPrefix(rest[1+width:end], metadataSection("")) {
+			stripped = append(stripped, rest[:end]...)
+		}
+		rest = rest[end:]
+	}
+	return stripped
 }
 
 func appendFixtureMetadata(t *testing.T, module []byte, metadata string) string {
@@ -48,7 +70,11 @@ func appendFixtureMetadata(t *testing.T, module []byte, metadata string) string 
 
 func TestAdmissionRequiresEmbeddedMetadata(t *testing.T) {
 	for _, name := range []string{"component-no-sudo", "core-echo"} {
-		_, err := Validate(t.Context(), filepath.Join("testdata", name+".wasm"))
+		path := filepath.Join(t.TempDir(), name+".wasm")
+		if err := os.WriteFile(path, unpackagedFixture(t, name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Validate(t.Context(), path)
 		if err == nil || !strings.Contains(err.Error(), "custom section") {
 			t.Fatalf("%s: expected missing metadata, got %v", name, err)
 		}

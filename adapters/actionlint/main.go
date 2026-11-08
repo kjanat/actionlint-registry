@@ -41,6 +41,9 @@ func run(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return errors.New("usage: actionlint-checker <local-artifact>")
 	}
+	if validation.HostCommit == "" {
+		return errors.New("checker build lacks the actionlint host module revision")
+	}
 	file, err := os.Open(args[0])
 	if err != nil {
 		return err

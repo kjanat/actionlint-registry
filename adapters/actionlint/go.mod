@@ -6,7 +6,10 @@ toolchain go1.27.3
 
 tool actionlint.kjanat.dev/v2/cmd/actionlint
 
-require actionlint.kjanat.dev/v2 v2.0.0-20261107150935-afaa8f8a5c53
+require (
+	actionlint.kjanat.dev/v2 v2.0.0-20261107150935-afaa8f8a5c53
+	golang.org/x/mod v0.42.0
+)
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.3 // indirect
@@ -30,7 +33,6 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
