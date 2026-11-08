@@ -1,42 +1,6 @@
 {
   "schema_version": 1,
   "aliases": {
-    "trailing-space": {
-      "repository": "github.com/kjanat/actionlint/examples/trailing-space",
-      "reserved": true
-    },
-    "psscriptanalyzer": {
-      "repository": "github.com/kjanat/actionlint/examples/psscriptanalyzer",
-      "reserved": true
-    },
-    "grant": {
-      "repository": "github.com/kjanat/actionlint/examples/external-linters/grant",
-      "reserved": true
-    },
-    "grype": {
-      "repository": "github.com/kjanat/actionlint/examples/external-linters/grype",
-      "reserved": true
-    },
-    "poutine": {
-      "repository": "github.com/kjanat/actionlint/examples/external-linters/poutine",
-      "reserved": true
-    },
-    "runner-guard": {
-      "repository": "github.com/kjanat/actionlint/examples/external-linters/runner-guard",
-      "reserved": true
-    },
-    "syft": {
-      "repository": "github.com/kjanat/actionlint/examples/external-linters/syft",
-      "reserved": true
-    },
-    "yamllint": {
-      "repository": "github.com/kjanat/actionlint/examples/external-linters/yamllint",
-      "reserved": true
-    },
-    "zizmor": {
-      "repository": "github.com/kjanat/actionlint/examples/external-linters/zizmor",
-      "reserved": true
-    },
     "shuck": {
       "repository": "github.com/kjanat/actionlint-plugin-shuck",
       "reserved": true
