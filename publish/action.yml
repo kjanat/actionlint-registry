@@ -17,7 +17,7 @@ inputs:
     description: Successful candidate check receipt for the exact release asset or OCI root.
     default: ""
   actionlint:
-    description: Host executable used by the candidate check.
+    description: Host executable used by the candidate check; defaults to the actionlint revision pinned by the registry checker.
     default: ""
   fixture:
     description: Behavioral fixture used by the candidate check.
@@ -59,6 +59,22 @@ outputs:
 runs:
   using: composite
   steps:
+    - if: inputs.actionlint == ''
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      with:
+        go-version-file: ${{ github.action_path }}/../adapters/actionlint/go.mod
+        cache: false
+    - name: Build the registry checker host
+      id: host
+      if: inputs.actionlint == ''
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        host="${RUNNER_TEMP}/actionlint-registry/actionlint"
+        mkdir -p "${host%/*}"
+        go -C "$ACTION_PATH/../adapters/actionlint" build -trimpath -o "$host" actionlint.kjanat.dev/v2/cmd/actionlint
+        printf 'actionlint=%s\n' "$host" >>"$GITHUB_OUTPUT"
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       with:
         bun-version-file: ${{ github.action_path }}/../.tool-versions
@@ -78,7 +94,7 @@ runs:
         PLUGIN_SHA256: ${{ inputs.sha256 }}
         PLUGIN_OCI: ${{ inputs.oci }}
         CANDIDATE_RECEIPT: ${{ inputs.candidate-receipt }}
-        ACTIONLINT: ${{ inputs.actionlint }}
+        ACTIONLINT: ${{ inputs.actionlint || steps.host.outputs.actionlint }}
         FIXTURE: ${{ inputs.fixture }}
         PLUGIN_REPOSITORY: ${{ inputs.repository }}
         PLUGIN_TAG: ${{ inputs.tag }}
@@ -110,7 +126,7 @@ runs:
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-        ACTIONLINT: ${{ inputs.actionlint }}
+        ACTIONLINT: ${{ inputs.actionlint || steps.host.outputs.actionlint }}
         FIXTURE: ${{ inputs.fixture }}
         CANDIDATE_RECEIPT: ${{ inputs.candidate-receipt }}
         RELEASE_TAG: ${{ inputs.tag }}

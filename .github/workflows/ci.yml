@@ -70,16 +70,14 @@ jobs:
         with: { go-version-file: adapters/actionlint/go.mod, cache: false }
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with: { bun-version-file: ".tool-versions", no-cache: true }
-      - name: Build supported host and package fixture
+      - name: Package fixture
         run: |
           bun install --frozen-lockfile
           mkdir -p "$RUNNER_TEMP/candidate-check"
-          go -C adapters/actionlint build -o "$RUNNER_TEMP/candidate-check/actionlint" actionlint.kjanat.dev/v2/cmd/actionlint
           bun adapters/actionlint/internal/validation/testdata/candidate.ts package --output "$RUNNER_TEMP/candidate-check/plugin.wasm"
       - name: Exercise the shared candidate action
         uses: ./check
         with:
-          actionlint: ${{ runner.temp }}/candidate-check/actionlint
           artifact: ${{ runner.temp }}/candidate-check/plugin.wasm
           fixture: adapters/actionlint/internal/validation/testdata/candidate.ts
           report: ${{ runner.temp }}/candidate-check/receipt.json

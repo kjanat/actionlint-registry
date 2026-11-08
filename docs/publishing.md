@@ -130,20 +130,20 @@ change the package bytes without a version bump still test installation and beha
 
 [`publish/action.yml`](../publish/action.yml) accepts:
 
-| Input                    | Purpose                                                                     |
-| ------------------------ | --------------------------------------------------------------------------- |
-| `directory`              | Packaged files, default `artifacts`; every file must appear in `SHA256SUMS` |
-| `asset`                  | Distributed Wasm or process manifest filename                               |
-| `sha256`                 | Exact release asset digest; for Wasm this comes from candidate check        |
-| `oci`                    | Existing OCI reference pinned by `@sha256`; mutually exclusive with `asset` |
-| `candidate-receipt`      | Successful candidate receipt for the exact release asset or OCI root        |
-| `actionlint`, `fixture`  | Host executable and fixture used for candidate and delivery checks          |
-| `allow-config-processes` | Explicit consent for native process fixture checks, default `false`         |
-| `tag`, `repository`      | Existing tag and its public repository, defaulting to the workflow context  |
-| `kind`                   | `core`, `component`, or `manifest`, default `component`                     |
-| `notes-file`             | UTF-8 release notes; defaults to commit subjects since the previous release |
-| `receipt`                | Publication progress file, default `publication.json`                       |
-| `timeout-seconds`        | Publication wait budget, default 1800                                       |
+| Input                    | Purpose                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `directory`              | Packaged files, default `artifacts`; every file must appear in `SHA256SUMS`          |
+| `asset`                  | Distributed Wasm or process manifest filename                                        |
+| `sha256`                 | Exact release asset digest; for Wasm this comes from candidate check                 |
+| `oci`                    | Existing OCI reference pinned by `@sha256`; mutually exclusive with `asset`          |
+| `candidate-receipt`      | Successful candidate receipt for the exact release asset or OCI root                 |
+| `actionlint`, `fixture`  | Host (default: the registry checker's pinned actionlint) and fixture for both checks |
+| `allow-config-processes` | Explicit consent for native process fixture checks, default `false`                  |
+| `tag`, `repository`      | Existing tag and its public repository, defaulting to the workflow context           |
+| `kind`                   | `core`, `component`, or `manifest`, default `component`                              |
+| `notes-file`             | UTF-8 release notes; defaults to commit subjects since the previous release          |
+| `receipt`                | Publication progress file, default `publication.json`                                |
+| `timeout-seconds`        | Publication wait budget, default 1800                                                |
 
 Use the same reviewed registry revision for both actions. A Wasm publishing job
 needs `contents: write` and `id-token: write`, and must run on the existing release

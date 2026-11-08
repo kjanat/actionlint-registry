@@ -11,7 +11,7 @@ inputs:
     description: Local ORAS image layout containing the pinned oci root; check before uploading an image.
     default: ""
   actionlint:
-    description: Executable for the supported actionlint revision.
+    description: Host executable; defaults to the actionlint revision pinned by the registry checker.
     default: ""
   fixture:
     description: TypeScript module exporting prepare and verify for the plugin's behavior.
@@ -29,6 +29,9 @@ outputs:
   sha256:
     description: SHA-256 of the tested release asset bytes or OCI root manifest.
     value: ${{ steps.check.outputs.sha256 }}
+  actionlint:
+    description: Host executable the candidate was checked with; pass it to the publish action.
+    value: ${{ steps.check.outputs.actionlint }}
 runs:
   using: composite
   steps:
@@ -62,6 +65,12 @@ runs:
         tools="$(mktemp -d)"
         trap 'rm -rf -- "$tools"' EXIT
         go -C "$ACTION_PATH/.." build -o "$tools/registry" ./cmd/registry
+        if [[ -z "$ACTIONLINT" ]]; then
+          ACTIONLINT="${RUNNER_TEMP}/actionlint-registry/actionlint"
+          mkdir -p "${ACTIONLINT%/*}"
+          go -C "$ACTION_PATH/../adapters/actionlint" build -trimpath -o "$ACTIONLINT" actionlint.kjanat.dev/v2/cmd/actionlint
+        fi
+        printf 'actionlint=%s\n' "$ACTIONLINT" >>"$GITHUB_OUTPUT"
         store="$ACTION_PATH/../registry/plugins"
         if [[ "$REF_TYPE" != "tag" ]]; then
           store="$tools/store"
