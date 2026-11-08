@@ -7,13 +7,13 @@
     {
       "description": "Update the actionlint checker after manual approval.",
       "matchManagers": ["gomod"],
-      "matchPackageNames": ["actionlint.kjanat.dev", "github.com/kjanat/actionlint"],
+      "matchPackageNames": ["actionlint.kjanat.dev/v2", "github.com/kjanat/actionlint"],
       "groupName": "actionlint host",
       "separateMajorMinor": false,
       "dependencyDashboardApproval": true,
       "automerge": false,
       "prBodyNotes": [
-        "Update adapters/actionlint/internal/validation/validation.go HostCommit to match the actionlint revision in adapters/actionlint/go.mod. Verify the WIT/ABI contract and runtime fixtures before merging."
+        "The checker reports the host revision from adapters/actionlint/go.mod and its tests load fixtures from that revision. A changed WIT contract needs matching constants in adapters/actionlint/internal/validation."
       ]
     }
   ]
