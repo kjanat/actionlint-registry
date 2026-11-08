@@ -194,6 +194,42 @@ export class GitHubPublisher {
 		);
 	}
 
+	private async commitNotes(repository: string, tag: string): Promise<string> {
+		const [owner, name] = repository.split('/');
+		if (!owner || !name) throw new Error('Invalid repository');
+		const reply = await this.http.json(`${this.api}/graphql`, {
+			method: 'POST',
+			headers: this.headers(),
+			body: JSON.stringify({
+				query:
+					'query PublishedReleases($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { releases(first: 50, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { tagName isDraft } } } }',
+				variables: { owner, name },
+			}),
+		});
+		if (reply.errors !== undefined && (!Array.isArray(reply.errors) || reply.errors.length !== 0)) {
+			throw new Error('GitHub release history lookup failed');
+		}
+		const nodes = object(object(object(reply.data).repository).releases).nodes;
+		if (!Array.isArray(nodes)) throw new Error('Invalid release history');
+		const previous = nodes.map(object).find((node) => node.isDraft === false && node.tagName !== tag);
+		if (previous === undefined) return 'First release.';
+		const base = text(previous.tagName, 'previous release tag');
+		const comparison = await this.http.json(
+			`${this.api}/repos/${repository}/compare/${encodeURIComponent(base)}...${encodeURIComponent(tag)}`,
+			{ headers: this.headers() },
+		);
+		if (!Array.isArray(comparison.commits)) throw new Error('Invalid commit comparison');
+		const lines = comparison.commits.map(object)
+			.filter((entry) => !Array.isArray(entry.parents) || entry.parents.length < 2)
+			.map((entry) => {
+				const message = object(entry.commit).message;
+				if (typeof message !== 'string') throw new Error('Invalid commit message');
+				const subject = text(message.split(/\r?\n/u, 1)[0], 'commit subject');
+				return `- ${subject} (${text(entry.sha, 'commit SHA').slice(0, 7)})`;
+			});
+		return [...lines, '', `Commits since ${base}.`].join('\n');
+	}
+
 	private async compare(
 		repository: string,
 		existing: Release,
@@ -285,7 +321,7 @@ export class GitHubPublisher {
 						name: tag,
 						draft: true,
 						prerelease: tag.includes('-'),
-						...(notes ? { body: notes } : { generate_release_notes: true }),
+						body: notes || await this.commitNotes(repository, tag),
 					}),
 				}),
 			);

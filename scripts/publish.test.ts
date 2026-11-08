@@ -343,9 +343,29 @@ test('GitHub publication downloads every uploaded byte before making a draft pub
 			}
 			if (url.pathname === '/graphql') {
 				const requestBody = JSON.parse((await body(request)).toString());
+				if (String(requestBody.query).includes('PublishedReleases')) {
+					assert.deepEqual(requestBody.variables, { owner: 'owner', name: 'repo' });
+					return json(response, {
+						data: {
+							repository: {
+								releases: {
+									nodes: [{ tagName: 'v1.0.0', isDraft: true }, { tagName: 'v0.9.0', isDraft: false }],
+								},
+							},
+						},
+					});
+				}
 				assert.deepEqual(requestBody.variables, { owner: 'owner', name: 'repo', tag: 'v1.0.0' });
 				return json(response, {
 					data: { repository: { release: created ? { databaseId: 7, tagName: 'v1.0.0' } : null } },
+				});
+			}
+			if (url.pathname === '/repos/owner/repo/compare/v0.9.0...v1.0.0') {
+				return json(response, {
+					commits: [
+						{ sha: 'abcdef1234567890', parents: [{}], commit: { message: 'Fix source tracking\n\nDetails.' } },
+						{ sha: '1234567abcdef', parents: [{}, {}], commit: { message: 'Merge branch' } },
+					],
 				});
 			}
 			if (url.pathname.endsWith('/tags/v1.0.0')) {
@@ -363,7 +383,7 @@ test('GitHub publication downloads every uploaded byte before making a draft pub
 					name: 'v1.0.0',
 					draft: true,
 					prerelease: false,
-					...(notes ? { body: notes } : { generate_release_notes: true }),
+					body: notes || '- Fix source tracking (abcdef1)\n\nCommits since v0.9.0.',
 				});
 				created = true;
 				return json(response, description());
