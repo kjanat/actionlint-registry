@@ -1,0 +1,71 @@
+{
+  "identity_version": 2,
+  "record_version": 2,
+  "artifact": {
+    "kind": "manifest",
+    "sha256": "222a4dd22ba2f5da08b6788fb2e3eaf84c5435c4c457ee7fa2bdddd55eff25c9",
+    "plugin_id": "github.com/kjanat/actionlint/examples/external-linters/syft",
+    "plugin_version": "0.1.0-plugins.1",
+    "repository": "https://github.com/kjanat/actionlint",
+    "contract": "process/1",
+    "metadata": {
+      "metadata_version": 1,
+      "id": "github.com/kjanat/actionlint/examples/external-linters/syft",
+      "name": "Syft image inventory provider",
+      "description": "Writes Syft JSON SBOM files for static container references in the captured workflow or action.",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/kjanat/actionlint",
+      "plugin_version": "0.1.0-plugins.1",
+      "transport": "process"
+    }
+  },
+  "submission": {
+    "schema_version": 2,
+    "provider": "github",
+    "repository": "kjanat/actionlint",
+    "tag": "v0.1.0-plugins.1",
+    "kind": "manifest",
+    "artifact": {
+      "type": "release-asset",
+      "name": "actionlint-plugin-syft.json",
+      "sha256": "222a4dd22ba2f5da08b6788fb2e3eaf84c5435c4c457ee7fa2bdddd55eff25c9"
+    }
+  },
+  "receipt": {
+    "schema_version": 1,
+    "id": "3f6b8b97-0ff4-4a96-a894-e23a07f18521",
+    "submission": {
+      "schema_version": 2,
+      "provider": "github",
+      "repository": "kjanat/actionlint",
+      "tag": "v0.1.0-plugins.1",
+      "kind": "manifest",
+      "artifact": {
+        "type": "release-asset",
+        "name": "actionlint-plugin-syft.json",
+        "sha256": "222a4dd22ba2f5da08b6788fb2e3eaf84c5435c4c457ee7fa2bdddd55eff25c9"
+      }
+    },
+    "identity": {
+      "issuer": "https://token.actions.githubusercontent.com",
+      "subject": "repo:kjanat@6353477/actionlint@1326162482:ref:refs/tags/v0.1.0-plugins.1",
+      "repository_id": "1326162482",
+      "owner_id": "6353477",
+      "repository": "kjanat/actionlint",
+      "ref": "refs/tags/v0.1.0-plugins.1",
+      "commit": "abaaf9fdae3c543ec012a76fe010bec3cbb0704e",
+      "workflow": "kjanat/actionlint/.github/workflows/plugin-publication.yml@refs/tags/v0.1.0-plugins.1",
+      "run_id": "42492822346:1"
+    },
+    "authorized_at": "2026-11-08T15:03:34Z"
+  },
+  "owner_id": 6353477,
+  "upstream_immutable": true,
+  "repository_id": 1326162482,
+  "release_id": 438318767,
+  "asset_id": 724276342,
+  "commit": "abaaf9fdae3c543ec012a76fe010bec3cbb0704e",
+  "url": "https://github.com/kjanat/actionlint/releases/download/v0.1.0-plugins.1/actionlint-plugin-syft.json",
+  "published_at": "2026-11-08T15:03:18Z",
+  "accepted_at": "2026-11-08T15:15:40.5623442Z"
+}
