@@ -37,6 +37,7 @@ const check = command('check')
 		flag.enum(['core', 'component', 'manifest']).describe('Execution kind, inferred from the artifact when omitted'),
 	)
 	.flag('allow-config-processes', flag.boolean().describe('Consent to execute native process plugins during checks'))
+	.flag('checker', flag.string().default('').describe('Compatibility checker that runs before installation'))
 	.flag(
 		'fixture',
 		flag.string().default('').describe('Plugin behavioral fixture module'),
@@ -81,6 +82,7 @@ const check = command('check')
 			store: flags.store,
 			report: flags.report,
 			allowConfigProcesses: flags['allow-config-processes'],
+			...(flags.checker ? { checker: flags.checker } : {}),
 			...(flags.kind === undefined ? {} : { kind: flags.kind }),
 			...(flags['oci-layout'] ? { ociLayout: flags['oci-layout'] } : {}),
 		};

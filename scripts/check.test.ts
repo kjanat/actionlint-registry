@@ -263,6 +263,93 @@ test('failed verification removes an old success receipt', async () => {
 	}
 });
 
+test('a failed checker outcome rejects the candidate and removes an old receipt', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'registry-checker-failed-'));
+	try {
+		const report = join(directory, 'candidate.json');
+		const registry = join(directory, 'registry');
+		const checker = join(directory, 'checker');
+		const artifact = join(directory, 'plugin.wasm');
+		await writeFile(report, '{"offline":true}');
+		const calls: string[][] = [];
+		await assert.rejects(
+			checkCandidate({
+				actionlint: join(directory, 'host'),
+				fixture: join(directory, 'fixture.ts'),
+				registry,
+				checker,
+				artifact,
+				store: directory,
+				report,
+			}, async (binary, args) => {
+				calls.push([binary, ...args]);
+				return JSON.stringify({ report: { outcome: 'failed', detail: '##[error]forged' } });
+			}),
+			/Registry checker rejected the candidate: ##\[error\]forged/,
+		);
+		assert.deepEqual(calls, [[registry, 'check', '--checker', checker, '--artifact', artifact]]);
+		await assert.rejects(readFile(report), /ENOENT/);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test('a passed checker outcome continues to installation', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'registry-checker-passed-'));
+	try {
+		await writeFile(join(directory, 'host'), 'tested host');
+		await writeFile(join(directory, 'fixture.ts'), 'trusted behavioral fixture');
+		const calls: string[] = [];
+		await assert.rejects(
+			checkCandidate({
+				actionlint: join(directory, 'host'),
+				fixture: join(directory, 'fixture.ts'),
+				registry: join(directory, 'registry'),
+				checker: join(directory, 'checker'),
+				artifact: join(directory, 'plugin.wasm'),
+				store: directory,
+				report: join(directory, 'candidate.json'),
+			}, async (_binary, args) => {
+				calls.push(args[0] ?? '');
+				if (args[0] === 'check') return JSON.stringify({ report: { outcome: 'passed' } });
+				throw new Error('installation started');
+			}),
+			/installation started/,
+		);
+		assert.equal(calls[0], 'check');
+		assert.ok(calls.length > 1);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test('an OCI candidate skips the checker', async () => {
+	const directory = await mkdtemp(join(tmpdir(), 'registry-checker-oci-'));
+	try {
+		await writeFile(join(directory, 'host'), 'tested host');
+		await writeFile(join(directory, 'fixture.ts'), 'trusted behavioral fixture');
+		const calls: string[] = [];
+		await assert.rejects(
+			checkCandidate({
+				actionlint: join(directory, 'host'),
+				fixture: join(directory, 'fixture.ts'),
+				registry: join(directory, 'registry'),
+				checker: join(directory, 'checker'),
+				artifact: `oci://ghcr.io/owner/repo/plugin@sha256:${'0'.repeat(64)}`,
+				store: directory,
+				report: join(directory, 'candidate.json'),
+			}, async (_binary, args) => {
+				calls.push(args[0] ?? '');
+				throw new Error('installation started');
+			}),
+			/installation started/,
+		);
+		assert.ok(!calls.includes('check'));
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 test('failed delivery preflight removes an old delivery report', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'registry-delivery-report-'));
 	try {
