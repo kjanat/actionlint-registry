@@ -7,8 +7,7 @@ bun                                       = "latest"
 "go:actionlint.kjanat.dev/cmd/actionlint" = { version = "fuck-it", auto_update = true, depends = ["go", "github:kjanat/shellcheck-rs"] }
 
 [settings]
-idiomatic_version_file_enable_tools            = ["node", "bun", "go"]
-idiomatic_version_file_ignore_minimum_versions = true
+idiomatic_version_file_enable_tools = ["node", "bun", "go"]
 
 [wrappers]
 [wrappers.wrangler]
