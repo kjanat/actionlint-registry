@@ -1,0 +1,71 @@
+{
+  "identity_version": 2,
+  "record_version": 2,
+  "artifact": {
+    "kind": "manifest",
+    "sha256": "c9c76bf8d2589d799473903046238b052deb044d29c46606ce71215684dffe1e",
+    "plugin_id": "github.com/kjanat/actionlint/examples/external-linters/grant",
+    "plugin_version": "0.1.0-plugins.1",
+    "repository": "https://github.com/kjanat/actionlint",
+    "contract": "process/1",
+    "metadata": {
+      "metadata_version": 1,
+      "id": "github.com/kjanat/actionlint/examples/external-linters/grant",
+      "name": "Grant license policy provider",
+      "description": "Checks Syft SBOM files against a Grant policy for images in the captured document.",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/kjanat/actionlint",
+      "plugin_version": "0.1.0-plugins.1",
+      "transport": "process"
+    }
+  },
+  "submission": {
+    "schema_version": 2,
+    "provider": "github",
+    "repository": "kjanat/actionlint",
+    "tag": "v0.1.0-plugins.1",
+    "kind": "manifest",
+    "artifact": {
+      "type": "release-asset",
+      "name": "actionlint-plugin-grant.json",
+      "sha256": "c9c76bf8d2589d799473903046238b052deb044d29c46606ce71215684dffe1e"
+    }
+  },
+  "receipt": {
+    "schema_version": 1,
+    "id": "6ecbed01-bbb1-48ad-83a1-08d2290b93c3",
+    "submission": {
+      "schema_version": 2,
+      "provider": "github",
+      "repository": "kjanat/actionlint",
+      "tag": "v0.1.0-plugins.1",
+      "kind": "manifest",
+      "artifact": {
+        "type": "release-asset",
+        "name": "actionlint-plugin-grant.json",
+        "sha256": "c9c76bf8d2589d799473903046238b052deb044d29c46606ce71215684dffe1e"
+      }
+    },
+    "identity": {
+      "issuer": "https://token.actions.githubusercontent.com",
+      "subject": "repo:kjanat@6353477/actionlint@1326162482:ref:refs/tags/v0.1.0-plugins.1",
+      "repository_id": "1326162482",
+      "owner_id": "6353477",
+      "repository": "kjanat/actionlint",
+      "ref": "refs/tags/v0.1.0-plugins.1",
+      "commit": "abaaf9fdae3c543ec012a76fe010bec3cbb0704e",
+      "workflow": "kjanat/actionlint/.github/workflows/plugin-publication.yml@refs/tags/v0.1.0-plugins.1",
+      "run_id": "42492822346:1"
+    },
+    "authorized_at": "2026-11-08T15:03:31Z"
+  },
+  "owner_id": 6353477,
+  "upstream_immutable": true,
+  "repository_id": 1326162482,
+  "release_id": 438318767,
+  "asset_id": 724276305,
+  "commit": "abaaf9fdae3c543ec012a76fe010bec3cbb0704e",
+  "url": "https://github.com/kjanat/actionlint/releases/download/v0.1.0-plugins.1/actionlint-plugin-grant.json",
+  "published_at": "2026-11-08T15:03:18Z",
+  "accepted_at": "2026-11-08T15:04:25.323101617Z"
+}
