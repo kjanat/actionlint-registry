@@ -67,11 +67,12 @@ function unsignedLEB(value: number): number[] {
 
 function hostFixture(): string {
 	const module = fileURLToPath(new URL('../../..', import.meta.url));
-	const directory = execFileSync('go', ['list', '-m', '-f', '{{.Dir}}', 'actionlint.kjanat.dev/v2'], {
+	const download = object(JSON.parse(execFileSync('go', ['mod', 'download', '-json', 'actionlint.kjanat.dev/v2'], {
 		cwd: module,
 		encoding: 'utf8',
-	}).trim();
-	return join(directory, 'internal/plugins/execution/component/testdata/plugins/no-sudo.wasm');
+	})));
+	assert.ok(typeof download.Dir === 'string' && download.Dir !== '', 'go mod download returned no module directory');
+	return join(download.Dir, 'internal/plugins/execution/component/testdata/plugins/no-sudo.wasm');
 }
 
 function withoutDiscovery(module: Buffer): Buffer {
