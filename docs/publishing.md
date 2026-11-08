@@ -124,7 +124,9 @@ runtime and capability controls.
 [`check/action.yml`](../check/action.yml) builds the registry CLI and runs the local
 candidate check. Supply `artifact` or `oci`, plus `actionlint` and `fixture`;
 `report` defaults to `candidate.json`. Its `sha256` output identifies the tested
-release asset bytes or OCI root manifest.
+release asset bytes or OCI root manifest. On tag refs it checks the candidate against
+the accepted records. On other refs it uses an empty store, so dependency updates that
+change the package bytes without a version bump still test installation and behavior.
 
 [`publish/action.yml`](../publish/action.yml) accepts:
 

@@ -57,10 +57,16 @@ runs:
         ACTIONLINT: ${{ inputs.actionlint }}
         FIXTURE: ${{ inputs.fixture }}
         REPORT: ${{ inputs.report }}
+        REF_TYPE: ${{ github.ref_type }}
       run: |
         tools="$(mktemp -d)"
         trap 'rm -rf -- "$tools"' EXIT
         go -C "$ACTION_PATH/.." build -o "$tools/registry" ./cmd/registry
+        store="$ACTION_PATH/../registry/plugins"
+        if [[ "$REF_TYPE" != "tag" ]]; then
+          store="$tools/store"
+          mkdir "$store"
+        fi
         consent=()
         if [[ "$ALLOW_CONFIG_PROCESSES" == "true" ]]; then consent+=(--allow-config-processes); fi
         kind_args=()
@@ -70,4 +76,4 @@ runs:
         bash "$ACTION_PATH/../scripts/validate.sh" bun "$ACTION_PATH/../scripts/cli.ts" check \
           --registry "$tools/registry" --actionlint "$ACTIONLINT" \
           --artifact "$ARTIFACT" --oci "$OCI" --fixture "$FIXTURE" \
-          --store "$ACTION_PATH/../registry/plugins" --report "$REPORT" "${kind_args[@]}" "${consent[@]}" "${layout_args[@]}"
+          --store "$store" --report "$REPORT" "${kind_args[@]}" "${consent[@]}" "${layout_args[@]}"
