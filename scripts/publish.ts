@@ -285,7 +285,7 @@ export class GitHubPublisher {
 						name: tag,
 						draft: true,
 						prerelease: tag.includes('-'),
-						body: notes,
+						...(notes ? { body: notes } : { generate_release_notes: true }),
 					}),
 				}),
 			);

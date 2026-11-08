@@ -35,7 +35,7 @@ inputs:
     description: Explicit consent to run native process plugins in fixture checks.
     default: "false"
   notes-file:
-    description: UTF-8 release notes file; defaults to the tag's section of CHANGELOG.md when that file exists.
+    description: UTF-8 release notes file; GitHub generates notes from the commits since the previous release when omitted.
     default: ""
   receipt:
     description: Destination for publication status and validator links, including failures.
@@ -90,17 +90,6 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         args=()
-        if [[ -z "$NOTES_FILE" && -f CHANGELOG.md ]]; then
-          NOTES_FILE="$(mktemp)"
-          trap 'rm -f -- "$NOTES_FILE"' EXIT
-          awk -v version="${PLUGIN_TAG#v}" \
-            'index($0, "## [" version "]") == 1 || index($0, "## [v" version "]") == 1 { found = 1; next } found && (/^## \[/ || /^\[[^]]+\]: /) { exit } found { print }' \
-            CHANGELOG.md >"$NOTES_FILE"
-          if ! grep -q '[^[:space:]]' "$NOTES_FILE"; then
-            printf 'CHANGELOG.md has no section for %s.\n' "${PLUGIN_TAG#v}" >&2
-            exit 1
-          fi
-        fi
         if [[ -n "$NOTES_FILE" ]]; then args+=(--notes-file "$NOTES_FILE"); fi
         if [[ "$ALLOW_CONFIG_PROCESSES" == "true" ]]; then args+=(--allow-config-processes); fi
         if [[ -n "$PLUGIN_OCI" ]]; then

@@ -312,10 +312,11 @@ test('GitHub publication downloads every uploaded byte before making a draft pub
 	// Exercise the actual HTTP publisher against a release service that stores upload bodies.
 	// Corrupt one download and require the draft to stay private; matching bytes may publish once.
 	for (
-		const { corrupt, resume } of [
-			{ corrupt: false, resume: false },
-			{ corrupt: true, resume: false },
-			{ corrupt: false, resume: true },
+		const { corrupt, resume, notes } of [
+			{ corrupt: false, resume: false, notes: 'Fix source tracking.' },
+			{ corrupt: true, resume: false, notes: 'Fix source tracking.' },
+			{ corrupt: false, resume: true, notes: 'Fix source tracking.' },
+			{ corrupt: false, resume: false, notes: '' },
 		]
 	) {
 		const sample = await fixture();
@@ -362,7 +363,7 @@ test('GitHub publication downloads every uploaded byte before making a draft pub
 					name: 'v1.0.0',
 					draft: true,
 					prerelease: false,
-					body: 'Fix source tracking.',
+					...(notes ? { body: notes } : { generate_release_notes: true }),
 				});
 				created = true;
 				return json(response, description());
@@ -413,7 +414,7 @@ test('GitHub publication downloads every uploaded byte before making a draft pub
 						'owner/repo',
 						'v1.0.0',
 						pkg,
-						'Fix source tracking.',
+						notes,
 					),
 					/asset differs/,
 				);
@@ -424,7 +425,7 @@ test('GitHub publication downloads every uploaded byte before making a draft pub
 					'owner/repo',
 					'v1.0.0',
 					pkg,
-					'Fix source tracking.',
+					notes,
 				);
 				assert.equal(publishes, 1);
 				assert.equal(creations, resume ? 0 : 1);
@@ -438,7 +439,7 @@ test('GitHub publication downloads every uploaded byte before making a draft pub
 					'owner/repo',
 					'v1.0.0',
 					pkg,
-					'Fix source tracking.',
+					notes,
 				);
 				assert.equal(publishes, 1);
 				assert.equal(uploads.size, pkg.files.length);
