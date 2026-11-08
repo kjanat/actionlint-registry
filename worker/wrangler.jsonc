@@ -8,7 +8,20 @@
   "preview_urls": false,
   "observability": {
     "enabled": true,
-    "logs": { "invocation_logs": false }
+    "head_sampling_rate": 1,
+    "redact_query_string": false,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true
+    },
+    "issues": { "enabled": true }
   },
   "routes": [
     { "pattern": "registry.actionlint.kjanat.dev", "custom_domain": true }
