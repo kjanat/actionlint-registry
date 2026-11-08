@@ -26,9 +26,9 @@ a new dependency selection resolves; existing consumers must retain their pins.
 
 See the [metadata and execution checks](docs/metadata.md) for details.
 Downloads must not exceed 64 MiB, and decompressed WASM must not exceed 128 MiB.
-Admission inspects declarations without executing plugins. Optional compatibility
-checkers run in child processes without inherited registry credentials; this is
-not an operating-system sandbox.
+Admission inspects declarations and runs the bundled compatibility checker on release
+assets. Checkers run in child processes without inherited registry credentials; this
+is not an operating-system sandbox.
 
 ```sh
 mise run setup

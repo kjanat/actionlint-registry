@@ -51,7 +51,9 @@ jobs:
           cache: false
       - name: Build registry admission service
         if: steps.claim.outputs.claimed == 'true'
-        run: go build -o registry-cli ./cmd/registry
+        run: |
+          go build -o registry-cli ./cmd/registry
+          go -C adapters/actionlint build -trimpath -o ../../registry-checker .
       # Admission reads metadata without executing publisher code. This job has no repository write access.
       - name: Verify authenticated release
         id: admission
@@ -62,6 +64,7 @@ jobs:
           --receipt handoff/receipt.json
           --store registry/plugins
           --candidate candidate/plugins
+          --checker ./registry-checker
           --report reports/admission.json
       - name: Preserve admission report
         if: always() && steps.claim.outputs.claimed == 'true'

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,9 @@ func (f releaseTransport) RoundTrip(r *http.Request) (*http.Response, error) { r
 // existing registrations even when it writes elsewhere, and publication must
 // report a conflict introduced after validation without changing the real store.
 func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the admission workflow and its fake checker run on Linux")
+	}
 	t.Setenv("GH_TOKEN", "test-token")
 	root := t.TempDir()
 	storePath := filepath.Join(root, "registry/plugins")
@@ -115,6 +119,10 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 		wasm = append(wasm, section...)
 		digest := sha256.Sum256(wasm)
 		receipt.Submission.SHA256 = hex.EncodeToString(digest[:])
+		report := fmt.Sprintf(`{"schema_version":1,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"]}`, receipt.Submission.SHA256)
+		if err := os.WriteFile(filepath.Join(root, "registry-checker"), []byte("#!/bin/sh\nprintf '%s\\n' '"+report+"'\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 		receipt.Submission.Tag = "v" + version
 		receipt.Identity.Ref = "refs/tags/v" + version
 		receipt.AuthorizedAt = time.Now().UTC()

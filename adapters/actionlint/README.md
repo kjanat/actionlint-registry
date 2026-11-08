@@ -28,7 +28,7 @@ Script engines validate default options and repeated diagnostic calls. Runner
 providers resolve a selector with missing evidence for each declared target;
 vendor-specific snapshot behavior belongs in the publisher's candidate fixtures.
 Unknown contracts return `unsupported`; understood contracts that fail validation
-return `failed`. Neither result rejects a release from the registry.
+return `failed`. Admission and the shared candidate check reject `failed`.
 
 A host update that changes a WIT contract needs matching contract constants. The
 module's tests and linter fail until they match.

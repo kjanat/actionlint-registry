@@ -34,7 +34,6 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 // CheckCompatibility runs a trusted, explicitly selected checker on a checksum-verified
 // snapshot. It excludes registry credentials but does not provide an OS sandbox.
-// Admission never calls this function.
 func CheckCompatibility(ctx context.Context, executable, path string, entry Entry) (evidence compatibility.Evidence, err error) {
 	if err = entry.Submission.Validate(); err != nil {
 		return evidence, err

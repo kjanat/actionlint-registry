@@ -126,7 +126,7 @@ instructions, verify WIT semantics, or execute guest code.
 `go run registry.actionlint.kjanat.dev/cmd/registry@master inspect --artifact plugin.wasm` inspects declarations locally.
 It does not authorize or publish a release.
 
-## Optional compatibility checks
+## Compatibility checks
 
 The [actionlint adapter](../adapters/actionlint/) checks the contract understood by
 its own host dependency. Its checks cover ABI or WIT compatibility, embedded/runtime
@@ -147,7 +147,8 @@ process has no inherited registry credentials, but it is not an OS sandbox.
 The versioned [JSON report protocol](../schemas/compatibility.schema.json) records
 `passed`, `failed`, or `unsupported` for a particular artifact, host revision, and
 policy. A checker crash produces no compatibility evidence. Missing evidence means
-untested. No outcome changes admission or an existing release record.
+untested. Admission and the shared candidate check reject `failed`; `unsupported`
+is admitted. No outcome changes an existing release record.
 
 For release preparation, the [shared candidate check](publishing.md) also installs
 the exact local bytes through actionlint and executes a publisher-supplied fixture.

@@ -41,7 +41,7 @@ func run(ctx context.Context, args []string) error {
 	aliasesPath := flags.String("aliases", "registry/aliases.json", "Read registry-maintained alias assignments for catalogue export.")
 	downloadCounts := flags.Bool("download-counts", false, "Refresh GitHub asset download counts when exporting the catalogue.")
 	pluginID := flags.String("plugin", "", "Identify the plugin by provider/repository or host/repository.")
-	checker := flags.String("checker", "", "Run this trusted checker executable for an optional compatibility observation.")
+	checker := flags.String("checker", "", "Trusted checker executable; check records an observation and admit rejects a failed outcome.")
 	evidencePath := flags.String("compatibility", "registry/compatibility", "Read or append host compatibility observations in this directory.")
 	version := flags.String("version", "", "Resolve this exact accepted release tag.")
 	statusPath := flags.String("statuses", "registry/status", "Read or append audited release status events.")
@@ -243,7 +243,7 @@ func run(ctx context.Context, args []string) error {
 		} else {
 			providers["gitlab"] = registry.NewGitLab()
 		}
-		service := registry.Service{Providers: providers}
+		service := registry.Service{Providers: providers, Checker: *checker}
 		report := registry.NewReport("admit")
 		report.SubmissionID = receipt.ID
 		entry, admissionErr := service.Admit(ctx, &index, receipt)

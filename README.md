@@ -2,7 +2,8 @@
 
 This registry lists actionlint plugins and automatically accepts authenticated
 releases with verified checksums and discovery metadata. Publishers host their own
-binaries. Host compatibility is recorded separately and does not control publication.
+binaries. Admission runs the bundled actionlint checker and rejects a release it
+reports as `failed`.
 
 - Publication API: **https://registry.actionlint.kjanat.dev**
 - Static catalogue: **https://plugins.actionlint.kjanat.dev/**
@@ -304,8 +305,10 @@ an accepted release. Existing records retain their historical inline validation.
 
 The checker is trusted operator code. It runs with a deadline and bounded output,
 without inherited registry credentials. This process boundary is not an operating
-system sandbox. Admission never starts a checker, and a missing or crashing checker
-cannot block publication. See [metadata and checks](docs/metadata.md).
+system sandbox. Admission runs the bundled checker on the downloaded asset and
+rejects a `failed` outcome; `unsupported` contracts and OCI sources are admitted.
+A crashing checker makes the submission retryable. The shared candidate check runs
+the same checker before a release exists. See [metadata and checks](docs/metadata.md).
 
 ## Contributing
 
