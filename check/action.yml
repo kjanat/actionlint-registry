@@ -83,6 +83,7 @@ runs:
         layout_args=()
         if [[ -n "$OCI_LAYOUT" ]]; then layout_args+=(--oci-layout "$OCI_LAYOUT"); fi
         if [[ -z "$OCI" ]]; then
+          ARTIFACT="${ARTIFACT:-artifacts/plugin.wasm}"
           go -C "$ACTION_PATH/../adapters/actionlint" build -trimpath -o "$tools/checker" .
           observation="$("$tools/registry" check --checker "$tools/checker" --artifact "$ARTIFACT")"
           if [[ "$(jq -r .report.outcome <<<"$observation")" == failed ]]; then
