@@ -1,0 +1,152 @@
+{
+  "record_version": 2,
+  "artifact": {
+    "kind": "component",
+    "sha256": "d9a32abe75b061b6fcac54d40641fbb3eff4fa72d869bf41e6fbf00d31923eba",
+    "plugin_id": "shuck",
+    "plugin_version": "0.1.1",
+    "repository": "https://github.com/kjanat/actionlint-plugin-shuck",
+    "contract": "kjanat:actionlint/analyzer@0.2.0#sha256=287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23",
+    "metadata": {
+      "capabilities": {
+        "filesystem": false,
+        "fixes": true,
+        "network": false,
+        "source_annotations": false,
+        "source_files": false
+      },
+      "description": "Shuck shell analysis as an actionlint WebAssembly plugin",
+      "descriptor": {
+        "category": "correctness",
+        "description": "Check shell scripts with Shuck",
+        "documentation_url": "https://github.com/kjanat/actionlint-plugin-shuck",
+        "explanation": "Checks Bash, POSIX shell, mksh and Zsh scripts with Shuck.",
+        "help": "Use select, ignore and dialect under lint.rules.correctness.shuck.options.",
+        "maturity": "nursery",
+        "name": "shuck",
+        "options_schema": {
+          "$defs": {
+            "Dialect": {
+              "enum": [
+                "bash",
+                "posix",
+                "mksh",
+                "zsh"
+              ],
+              "type": "string"
+            }
+          },
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "dialect": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Dialect"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override the workflow interpreter's dialect."
+            },
+            "ignore": {
+              "default": [],
+              "description": "Shuck rule selectors to disable.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "select": {
+              "default": null,
+              "description": "Shuck rule codes, prefixes, categories or named groups to enable. Omission uses Shuck's defaults.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "title": "Options",
+          "type": "object"
+        },
+        "provider": "kjanat/actionlint-plugin-shuck",
+        "recommended": true,
+        "required_inputs": [
+          "scripts",
+          "invocations",
+          "execution"
+        ],
+        "subcategory": "shell"
+      },
+      "engine": {
+        "name": "shuck",
+        "version": "0.2.8"
+      },
+      "id": "shuck",
+      "interface": "kjanat:actionlint/analyzer@0.2.0",
+      "languages": [
+        "shell"
+      ],
+      "license": "MIT",
+      "metadata_version": 1,
+      "name": "Shuck",
+      "plugin_version": "0.1.1",
+      "repository": "https://github.com/kjanat/actionlint-plugin-shuck",
+      "transport": "wasm-component",
+      "wit_sha256": "287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23"
+    }
+  },
+  "submission": {
+    "schema_version": 2,
+    "provider": "github",
+    "repository": "kjanat/actionlint-plugin-shuck",
+    "tag": "v0.1.1",
+    "kind": "component",
+    "artifact": {
+      "type": "release-asset",
+      "name": "plugin.wasm",
+      "sha256": "d9a32abe75b061b6fcac54d40641fbb3eff4fa72d869bf41e6fbf00d31923eba"
+    }
+  },
+  "receipt": {
+    "schema_version": 1,
+    "id": "a8d28590-18e0-475a-b267-be5363c4d213",
+    "submission": {
+      "schema_version": 2,
+      "provider": "github",
+      "repository": "kjanat/actionlint-plugin-shuck",
+      "tag": "v0.1.1",
+      "kind": "component",
+      "artifact": {
+        "type": "release-asset",
+        "name": "plugin.wasm",
+        "sha256": "d9a32abe75b061b6fcac54d40641fbb3eff4fa72d869bf41e6fbf00d31923eba"
+      }
+    },
+    "identity": {
+      "issuer": "https://token.actions.githubusercontent.com",
+      "subject": "repo:kjanat@6353477/actionlint-plugin-shuck@1449840625:ref:refs/tags/v0.1.1",
+      "repository_id": "1449840625",
+      "owner_id": "6353477",
+      "repository": "kjanat/actionlint-plugin-shuck",
+      "ref": "refs/tags/v0.1.1",
+      "commit": "c0dfb8d47408f7a8f9f2f47994c073b72912639b",
+      "workflow": "kjanat/actionlint-plugin-shuck/.github/workflows/publish.yml@refs/tags/v0.1.1",
+      "run_id": "42492235166:1"
+    },
+    "authorized_at": "2026-11-08T14:56:25Z"
+  },
+  "owner_id": 6353477,
+  "upstream_immutable": true,
+  "repository_id": 1449840625,
+  "release_id": 438313402,
+  "asset_id": 724249535,
+  "commit": "c0dfb8d47408f7a8f9f2f47994c073b72912639b",
+  "url": "https://github.com/kjanat/actionlint-plugin-shuck/releases/download/v0.1.1/plugin.wasm",
+  "published_at": "2026-11-08T14:53:56Z",
+  "accepted_at": "2026-11-08T14:57:07.575025846Z"
+}
