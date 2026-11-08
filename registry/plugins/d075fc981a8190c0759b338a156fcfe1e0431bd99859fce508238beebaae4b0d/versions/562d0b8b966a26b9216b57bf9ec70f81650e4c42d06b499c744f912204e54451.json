@@ -1,0 +1,71 @@
+{
+  "identity_version": 2,
+  "record_version": 2,
+  "artifact": {
+    "kind": "manifest",
+    "sha256": "94fb93967b0885963316ba4e513dd649e140dc3001b2684295a8bcef2ea514bb",
+    "plugin_id": "github.com/kjanat/actionlint/examples/external-linters/grype",
+    "plugin_version": "0.1.0-plugins.1",
+    "repository": "https://github.com/kjanat/actionlint",
+    "contract": "process/1",
+    "metadata": {
+      "metadata_version": 1,
+      "id": "github.com/kjanat/actionlint/examples/external-linters/grype",
+      "name": "Grype image vulnerability provider",
+      "description": "Reports Grype vulnerability matches for static container references in the captured document.",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/kjanat/actionlint",
+      "plugin_version": "0.1.0-plugins.1",
+      "transport": "process"
+    }
+  },
+  "submission": {
+    "schema_version": 2,
+    "provider": "github",
+    "repository": "kjanat/actionlint",
+    "tag": "v0.1.0-plugins.1",
+    "kind": "manifest",
+    "artifact": {
+      "type": "release-asset",
+      "name": "actionlint-plugin-grype.json",
+      "sha256": "94fb93967b0885963316ba4e513dd649e140dc3001b2684295a8bcef2ea514bb"
+    }
+  },
+  "receipt": {
+    "schema_version": 1,
+    "id": "7e52137f-906d-439f-be42-4a968969882a",
+    "submission": {
+      "schema_version": 2,
+      "provider": "github",
+      "repository": "kjanat/actionlint",
+      "tag": "v0.1.0-plugins.1",
+      "kind": "manifest",
+      "artifact": {
+        "type": "release-asset",
+        "name": "actionlint-plugin-grype.json",
+        "sha256": "94fb93967b0885963316ba4e513dd649e140dc3001b2684295a8bcef2ea514bb"
+      }
+    },
+    "identity": {
+      "issuer": "https://token.actions.githubusercontent.com",
+      "subject": "repo:kjanat@6353477/actionlint@1326162482:ref:refs/tags/v0.1.0-plugins.1",
+      "repository_id": "1326162482",
+      "owner_id": "6353477",
+      "repository": "kjanat/actionlint",
+      "ref": "refs/tags/v0.1.0-plugins.1",
+      "commit": "abaaf9fdae3c543ec012a76fe010bec3cbb0704e",
+      "workflow": "kjanat/actionlint/.github/workflows/plugin-publication.yml@refs/tags/v0.1.0-plugins.1",
+      "run_id": "42492822346:1"
+    },
+    "authorized_at": "2026-11-08T15:03:32Z"
+  },
+  "owner_id": 6353477,
+  "upstream_immutable": true,
+  "repository_id": 1326162482,
+  "release_id": 438318767,
+  "asset_id": 724276311,
+  "commit": "abaaf9fdae3c543ec012a76fe010bec3cbb0704e",
+  "url": "https://github.com/kjanat/actionlint/releases/download/v0.1.0-plugins.1/actionlint-plugin-grype.json",
+  "published_at": "2026-11-08T15:03:18Z",
+  "accepted_at": "2026-11-08T15:07:17.600473147Z"
+}
