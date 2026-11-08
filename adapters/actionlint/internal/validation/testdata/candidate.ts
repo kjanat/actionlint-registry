@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cli, command, flag } from '@kjanat/dreamcli';
 
 const workflow = `name: Registry smoke
@@ -63,10 +65,45 @@ function unsignedLEB(value: number): number[] {
 	return bytes;
 }
 
-// Add discovery metadata to the upstream component, just as a plugin package
+function hostFixture(): string {
+	const module = fileURLToPath(new URL('../../..', import.meta.url));
+	const directory = execFileSync('go', ['list', '-m', '-f', '{{.Dir}}', 'actionlint.kjanat.dev/v2'], {
+		cwd: module,
+		encoding: 'utf8',
+	}).trim();
+	return join(directory, 'internal/plugins/execution/component/testdata/plugins/no-sudo.wasm');
+}
+
+function withoutDiscovery(module: Buffer): Buffer {
+	const name = Buffer.from('actionlint.plugin');
+	const sections = [module.subarray(0, 8)];
+	let offset = 8;
+	while (offset < module.length) {
+		const start = offset;
+		const id = module[offset++];
+		let size = 0;
+		let shift = 0;
+		let byte: number | undefined;
+		do {
+			byte = module[offset++];
+			assert.ok(byte !== undefined && shift < 35, 'malformed section size');
+			size += (byte & 0x7f) * 2 ** shift;
+			shift += 7;
+		} while (byte & 0x80);
+		const end = offset + size;
+		assert.ok(end <= module.length, 'truncated section');
+		const body = module.subarray(offset, end);
+		const discovery = id === 0 && body[0] === name.length && body.subarray(1, 1 + name.length).equals(name);
+		if (!discovery) sections.push(module.subarray(start, end));
+		offset = end;
+	}
+	return Buffer.concat(sections);
+}
+
+// Replace the upstream component's discovery metadata, just as a plugin package
 // build does. Installation, lock creation and caching belong to the actual CLI.
 async function packageFixture(output: string): Promise<void> {
-	const bytes = await readFile(new URL('./component-no-sudo.wasm', import.meta.url));
+	const bytes = withoutDiscovery(await readFile(hostFixture()));
 	const metadata = {
 		metadata_version: 1,
 		transport: 'wasm-component',
