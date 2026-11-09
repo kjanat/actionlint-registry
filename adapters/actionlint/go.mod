@@ -8,7 +8,7 @@ tool actionlint.kjanat.dev/v2/cmd/actionlint
 
 require (
 	actionlint.kjanat.dev/v2 v2.0.0-20261107150935-afaa8f8a5c53
-	golang.org/x/mod v0.42.0
+	golang.org/x/mod v0.43.0
 )
 
 require (
