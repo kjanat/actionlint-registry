@@ -2,7 +2,7 @@ module actionlint.kjanat.dev/v2/registry/validation
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 tool actionlint.kjanat.dev/v2/cmd/actionlint
 
