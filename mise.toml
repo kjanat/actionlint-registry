@@ -1,11 +1,11 @@
 [tools]
-node                                      = "26.13.1"
-bun                                       = "latest"
-golangci-lint                             = "2.15.0"
-"github:kjanat/dprint"                    = "latest"
-"github:kjanat/runner"                    = "latest"
-"github:kjanat/shellcheck-rs"             = { version = "latest", rename_exe = "shellcheck" }
-"go:actionlint.kjanat.dev/cmd/actionlint" = { version = "fuck-it", auto_update = true, depends = ["go", "github:kjanat/shellcheck-rs"] }
+node                                         = "26.13.1"
+bun                                          = "latest"
+golangci-lint                                = "2.15.0"
+"github:kjanat/dprint"                       = "latest"
+"github:kjanat/runner"                       = "latest"
+"github:kjanat/shellcheck-rs"                = { version = "latest", rename_exe = "shellcheck" }
+"go:actionlint.kjanat.dev/v2/cmd/actionlint" = { version = "master", auto_update = true, depends = ["go", "github:kjanat/shellcheck-rs"] }
 
 [settings]
 idiomatic_version_file_enable_tools = ["node", "bun", "go"]
