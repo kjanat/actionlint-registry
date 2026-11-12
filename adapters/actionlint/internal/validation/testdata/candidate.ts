@@ -7,6 +7,7 @@ import { cli, command, flag } from '@kjanat/dreamcli';
 
 const workflow = `name: Registry smoke
 on: push
+permissions: {}
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -42,7 +43,7 @@ export async function verify({ directory, run }: Context): Promise<{ checks: str
 	assert.equal(result.diagnostics.length, 1);
 	const finding = object(result.diagnostics[0]);
 	assert.equal(finding.rule, 'no-sudo');
-	assert.deepEqual(finding.start, { line: 10, column: 11 });
+	assert.deepEqual(finding.start, { line: 11, column: 11 });
 	await writeFile(join(directory, 'workflow.yml'), workflow.replace('sudo ', ''));
 	try {
 		const clean = object(JSON.parse(await run(probe)));
