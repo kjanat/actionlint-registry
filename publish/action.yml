@@ -73,7 +73,7 @@ runs:
       run: |
         host="${RUNNER_TEMP}/actionlint-registry/actionlint"
         mkdir -p "${host%/*}"
-        go -C "$ACTION_PATH/../adapters/actionlint" build -trimpath -o "$host" actionlint.kjanat.dev/v2/cmd/actionlint
+        env -u GOROOT go -C "$ACTION_PATH/../adapters/actionlint" build -trimpath -o "$host" actionlint.kjanat.dev/v2/cmd/actionlint
         printf 'actionlint=%s\n' "$host" >>"$GITHUB_OUTPUT"
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       with:

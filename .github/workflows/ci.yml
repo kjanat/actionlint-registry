@@ -74,6 +74,13 @@ jobs:
           bun install --frozen-lockfile
           mkdir -p "$RUNNER_TEMP/candidate-check"
           bun adapters/actionlint/internal/validation/testdata/candidate.ts package --output "$RUNNER_TEMP/candidate-check/plugin.wasm"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with: { go-version: oldstable, cache: false }
+      - name: Export the caller's GOROOT as mise does
+        run: |
+          goroot="$(cd "$RUNNER_TEMP" && go env GOROOT)"
+          test -d "$goroot"
+          echo "GOROOT=$goroot" >>"$GITHUB_ENV"
       - name: Exercise the shared candidate action
         uses: ./check
         with:
