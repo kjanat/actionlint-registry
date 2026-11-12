@@ -20,6 +20,7 @@ var hostFixtures = map[string]string{
 	"component-runners":               "internal/plugins/execution/component/testdata/plugins/buildkite-runners.wasm",
 	"component-script-0.3.0":          "internal/plugins/execution/component/testdata/plugins/script-engine-0.3.0.wasm",
 	"component-template-script-0.3.0": "internal/plugins/execution/component/testdata/plugins/template-script-engine-0.3.0.wasm",
+	"component-insecure-download":     "internal/plugins/execution/component/testdata/plugins/insecure-download.wasm",
 	"component-wrong-enum":            "internal/plugins/execution/component/testdata/contracts/wrong-enum.wasm",
 	"component-wrong-record":          "internal/plugins/execution/component/testdata/contracts/wrong-record.wasm",
 	"component-wrong-signature":       "internal/plugins/execution/component/testdata/contracts/wrong-signature.wasm",
