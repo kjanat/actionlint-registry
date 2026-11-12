@@ -77,7 +77,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version: oldstable, cache: false }
       - name: Export the caller's GOROOT as mise does
-        run: echo "GOROOT=$(go env GOROOT)" >>"$GITHUB_ENV"
+        run: |
+          goroot="$(cd "$RUNNER_TEMP" && go env GOROOT)"
+          test -d "$goroot"
+          echo "GOROOT=$goroot" >>"$GITHUB_ENV"
       - name: Exercise the shared candidate action
         uses: ./check
         with:
