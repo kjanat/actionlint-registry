@@ -4,6 +4,8 @@ actionlint.kjanat.dev/v2 v2.0.0-20261112102509-783288499bac h1:5G7eG/1jQdMEDpTAx
 actionlint.kjanat.dev/v2 v2.0.0-20261112102509-783288499bac/go.mod h1:0qp8zri0s8p2JL2y/w17tFneMoH8FAQGw3F7oDdBJco=
 actionlint.kjanat.dev/v2 v2.0.0-20261112113614-327ceb05edea h1:16PuvAo2cSsSzs8oHd5I57nROi1SkG4R7MUHlroh4C0=
 actionlint.kjanat.dev/v2 v2.0.0-20261112113614-327ceb05edea/go.mod h1:0qp8zri0s8p2JL2y/w17tFneMoH8FAQGw3F7oDdBJco=
+actionlint.kjanat.dev/v2 v2.0.0-20261114130818-419ce473e46e h1:HPFvFK7rRwPJrz9hWAhBIXQtcdCSeRDBWqv7fDMw/gE=
+actionlint.kjanat.dev/v2 v2.0.0-20261114130818-419ce473e46e/go.mod h1:fog0seeT84o/Xhbfa7VD3ILeanNMGGpecPzQJUHHEeM=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
@@ -37,6 +39,8 @@ github.com/kjanat/wacogo v0.2.3 h1:rb51n/Ch7YzA5SETvAO5xecPXJrmWzFKlNoCmno3SYA=
 github.com/kjanat/wacogo v0.2.3/go.mod h1:yv07cANJgd9wWlfKy4k+RNJgZS5IPQEMj7e5FnL0+yo=
 github.com/kjanat/wazero v1.11.1 h1:nZitQ/QBpM1bquGvsSJf4S9aUtbUMbs0XHwNIPRQCY4=
 github.com/kjanat/wazero v1.11.1/go.mod h1:rUvkQkPCMYXQqVtV+0SjjYlKnI+4TuXkm9AVkhamDvw=
+github.com/kjanat/wazero v1.12.2 h1:KBXGrCQGza+opf6VsEPwczp7B7BcNe4WgLjWcBZjAWY=
+github.com/kjanat/wazero v1.12.2/go.mod h1:6j4cEbiug+UYd7xW6B/b66TwMRsJoXjja7tMHeTNXGA=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
