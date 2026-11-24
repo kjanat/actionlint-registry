@@ -14,8 +14,10 @@ go -C adapters/actionlint build -o ../../actionlint-checker .
 
 The executable accepts one local artifact path and writes one JSON compatibility
 report to stdout. The report's `runner_as_of` is the runner assessment date. It is
-the current UTC date unless `--runner-as-of YYYY-MM-DD` sets it. Run it through the registry's `check` command to verify the
-accepted artifact's checksum, isolate inherited credentials, and store the report.
+the current UTC date unless `--runner-as-of YYYY-MM-DD` sets it; the registry's
+`check` command passes a stored date there. Run the checker through that command
+to verify the accepted artifact's checksum, isolate inherited credentials, and
+store the report.
 The process boundary does not provide an operating-system sandbox.
 
 The checker uses the actionlint v2 revision required in `go.mod` and reports it

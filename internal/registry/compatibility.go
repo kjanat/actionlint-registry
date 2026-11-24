@@ -2,12 +2,14 @@ package registry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
@@ -21,6 +23,30 @@ func evidenceName(e compatibility.Evidence) (string, error) {
 		return "", err
 	}
 	return key(string(data)) + ".json", nil
+}
+
+// Recheck runs the checker on an accepted release with the runner assessment date
+// of the release's earliest dated evidence, then stores the new observation.
+func (store EvidenceStore) Recheck(ctx context.Context, index Index, executable, path string, entry Entry) (compatibility.Evidence, error) {
+	stored, err := store.Load(index)
+	if err != nil {
+		return compatibility.Evidence{}, err
+	}
+	runnerAsOf := ""
+	var earliest time.Time
+	for _, evidence := range stored {
+		if evidence.Report.ArtifactSHA256 != entry.Submission.Digest() || evidence.Report.RunnerAsOf == "" {
+			continue
+		}
+		if runnerAsOf == "" || evidence.ObservedAt.Before(earliest) {
+			runnerAsOf, earliest = evidence.Report.RunnerAsOf, evidence.ObservedAt
+		}
+	}
+	evidence, err := CheckCompatibility(ctx, executable, path, entry, runnerAsOf)
+	if err != nil {
+		return evidence, err
+	}
+	return evidence, store.Add(index, evidence)
 }
 
 func (store EvidenceStore) Add(index Index, evidence compatibility.Evidence) error {

@@ -128,7 +128,7 @@ func run(ctx context.Context, args []string) error {
 			if err != nil {
 				return err
 			}
-			evidence, err := registry.CheckArtifact(ctx, *checker, *artifactPath, declaration.SHA256)
+			evidence, err := registry.CheckArtifact(ctx, *checker, *artifactPath, declaration.SHA256, "")
 			if err != nil {
 				return err
 			}
@@ -141,11 +141,8 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		evidence, err := registry.CheckCompatibility(ctx, *checker, *artifactPath, entry)
+		evidence, err := (registry.EvidenceStore{Directory: *evidencePath}).Recheck(ctx, index, *checker, *artifactPath, entry)
 		if err != nil {
-			return err
-		}
-		if err = (registry.EvidenceStore{Directory: *evidencePath}).Add(index, evidence); err != nil {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(evidence)

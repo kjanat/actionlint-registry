@@ -67,7 +67,7 @@ func TestCheckerReportKeepsRunnerAssessmentDate(t *testing.T) {
 	}
 	sum := sha256.Sum256([]byte("candidate"))
 	digest := hex.EncodeToString(sum[:])
-	evidence, err := CheckArtifact(t.Context(), fakeChecker(t, digest, "passed", `["host-resolution"]`, `,"runner_as_of":"2026-12-08"`), path, digest)
+	evidence, err := CheckArtifact(t.Context(), fakeChecker(t, digest, "passed", `["host-resolution"]`, `,"runner_as_of":"2026-12-08"`), path, digest, "")
 	if err != nil {
 		t.Fatal(err)
 	}

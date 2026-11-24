@@ -34,25 +34,33 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 // CheckCompatibility runs a trusted, explicitly selected checker on a checksum-verified
 // snapshot. It excludes registry credentials but does not provide an OS sandbox.
-func CheckCompatibility(ctx context.Context, executable, path string, entry Entry) (evidence compatibility.Evidence, err error) {
+func CheckCompatibility(ctx context.Context, executable, path string, entry Entry, runnerAsOf string) (evidence compatibility.Evidence, err error) {
 	if err = entry.Submission.Validate(); err != nil {
 		return evidence, err
 	}
 	if entry.Submission.IsOCI() {
 		return evidence, errors.New("this checker accepts local package bytes; OCI graph checks are unsupported")
 	}
-	return CheckArtifact(ctx, executable, path, entry.Submission.Digest())
+	return CheckArtifact(ctx, executable, path, entry.Submission.Digest(), runnerAsOf)
 }
 
 // CheckArtifact observes a local candidate without requiring publication. The
 // caller supplies the inspected digest; the checker receives a verified snapshot.
-func CheckArtifact(ctx context.Context, executable, path, expectedDigest string) (evidence compatibility.Evidence, err error) {
+// An empty runnerAsOf lets the checker use the current UTC date.
+func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runnerAsOf string) (evidence compatibility.Evidence, err error) {
 	executable, err = filepath.Abs(executable)
 	if err != nil {
 		return evidence, err
 	}
 	if !digestPattern.MatchString(expectedDigest) {
 		return evidence, errors.New("invalid checker input digest")
+	}
+	var args []string
+	if runnerAsOf != "" {
+		if date, err := time.Parse(time.DateOnly, runnerAsOf); err != nil || date.Format(time.DateOnly) != runnerAsOf {
+			return evidence, errors.New("invalid runner assessment date")
+		}
+		args = append(args, "--runner-as-of", runnerAsOf)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
@@ -77,7 +85,7 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest string)
 	if digest != expectedDigest {
 		return evidence, errors.New("checker input checksum differs from inspected artifact")
 	}
-	cmd := exec.CommandContext(ctx, checkerPath, snapshot)
+	cmd := exec.CommandContext(ctx, checkerPath, append(args, snapshot)...)
 	cmd.Dir = dir
 	cmd.Env = []string{"GOMEMLIMIT=512MiB", "TMPDIR=" + dir, "TMP=" + dir, "TEMP=" + dir}
 	if root, ok := os.LookupEnv("SystemRoot"); ok {
@@ -96,6 +104,9 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest string)
 	}
 	if evidence.Report.ArtifactSHA256 != expectedDigest {
 		return evidence, errors.New("checker report refers to a different artifact")
+	}
+	if runnerAsOf != "" && evidence.Report.RunnerAsOf != runnerAsOf {
+		return evidence, fmt.Errorf("checker used runner assessment date %q instead of %q", evidence.Report.RunnerAsOf, runnerAsOf)
 	}
 	evidence.ObservedAt = time.Now().UTC()
 	return evidence, evidence.Validate()

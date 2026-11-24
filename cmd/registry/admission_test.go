@@ -138,6 +138,7 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	recheckReleaseWithStoredDate(t, root, storePath, original.Entries[0], wasm)
 	prepare("1.1.0", "different")
 	if err = run(t.Context(), admissionArgs); err == nil || registry.FailureDisposition(err) != "rejected" {
 		t.Fatalf("changed identity escaped existing registrations: %v", err)
@@ -184,5 +185,35 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 	}
 	if report.Mode != "merge" || report.SubmissionID != receipt.ID || len(report.Accepted) != 0 || len(report.Rejected) != 1 || report.Rejected[0].Disposition != "rejected" {
 		t.Fatalf("publication failure has no actionable report: %+v", report)
+	}
+}
+
+func recheckReleaseWithStoredDate(t *testing.T, root, storePath string, entry registry.Entry, wasm []byte) {
+	t.Helper()
+	artifactPath := filepath.Join(root, "accepted.wasm")
+	if err := os.WriteFile(artifactPath, wasm, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	argsLog := filepath.Join(root, "checker-args.log")
+	report := fmt.Sprintf(`{"schema_version":1,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s"}`, entry.Submission.SHA256)
+	script := "#!/bin/sh\ndate=2026-11-24\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\nif [ \"$1\" = --runner-as-of ]; then date=$2; fi\nprintf '" + report + "\\n' \"$date\"\n"
+	checker := filepath.Join(root, "dated-checker")
+	if err := os.WriteFile(checker, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	compatibilityPath := filepath.Join(root, "registry/compatibility")
+	args := []string{"check", "--store", storePath, "--compatibility", compatibilityPath, "--checker", checker, "--artifact", artifactPath, "--plugin", entry.Name(), "--version", entry.Submission.Tag}
+	for range 2 {
+		if err := run(t.Context(), args); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(calls) != 2 || strings.HasPrefix(calls[0], "--runner-as-of") || !strings.HasPrefix(calls[1], "--runner-as-of 2026-11-24 ") {
+		t.Fatalf("recheck did not replay the stored runner date: %q", calls)
 	}
 }

@@ -130,7 +130,7 @@ func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt)
 		}
 		if err == nil && service.Checker != "" {
 			var evidence compatibility.Evidence
-			evidence, err = CheckArtifact(ctx, service.Checker, path, s.Digest())
+			evidence, err = CheckArtifact(ctx, service.Checker, path, s.Digest(), "")
 			if err == nil && evidence.Report.Outcome == "failed" {
 				err = reject("compatibility check failed: " + evidence.Report.Detail)
 			}
