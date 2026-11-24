@@ -253,6 +253,7 @@ their own version records, regardless of the current preferred artifact.
 
 The generated root `index.json` contains plugin summaries and links. Per-plugin indexes
 contain version summaries and links; version records contain full evidence and metadata.
+A checked component version also lists the interfaces it imports and exports.
 The registry regenerates these indexes from accepted records. It does not choose a
 `latest` version by sorting tag names alphabetically.
 

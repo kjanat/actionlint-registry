@@ -9,11 +9,12 @@ import (
 )
 
 // ProtocolVersion 2 adds the --protocol probe, the --runner-as-of flag and the
-// required runner_as_of report field. Version 1 checkers accept neither flag.
-const ProtocolVersion = 2
+// required runner_as_of report field. Version 3 adds the imports and exports
+// report fields. Version 1 checkers accept neither flag.
+const ProtocolVersion = 3
 
-// ProtocolProbe is the argument a version 2 checker answers with its protocol
-// version instead of checking an artifact.
+// ProtocolProbe is the argument a version 2 or later checker answers with its
+// protocol version instead of checking an artifact.
 const ProtocolProbe = "--protocol"
 
 var digest = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -34,6 +35,8 @@ type Report struct {
 	Checks         []string `json:"checks"`
 	RunnerAsOf     string   `json:"runner_as_of,omitempty"`
 	Detail         string   `json:"detail,omitempty"`
+	Imports        []string `json:"imports,omitzero"`
+	Exports        []string `json:"exports,omitzero"`
 }
 
 func (r Report) Validate() error {
@@ -63,8 +66,26 @@ func (r Report) Validate() error {
 			return errors.New("invalid compatibility check name")
 		}
 	}
+	if r.HasInterfaces() != (r.Exports != nil) {
+		return errors.New("compatibility report requires both imports and exports or neither")
+	}
+	if r.HasInterfaces() && r.SchemaVersion < 3 {
+		return errors.New("protocol 1 and 2 reports carry no interfaces")
+	}
+	for _, names := range [][]string{r.Imports, r.Exports} {
+		if len(names) > 4096 {
+			return errors.New("compatibility report lists more than 4096 interfaces")
+		}
+		for _, name := range names {
+			if !bounded(name, 512) {
+				return errors.New("invalid interface name")
+			}
+		}
+	}
 	return nil
 }
+
+func (r Report) HasInterfaces() bool { return r.Imports != nil }
 
 func ValidDate(value string) bool {
 	date, err := time.Parse(time.DateOnly, value)

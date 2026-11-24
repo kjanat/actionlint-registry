@@ -38,8 +38,9 @@ contract. Admission does not require the registry's checker to support that ABI.
 
 ## Components
 
-Set `transport` to `"wasm-component"`, `interface` to the interface identity, and
-`wit_sha256` to the lowercase SHA-256 checksum of the canonical WIT.
+Set `transport` to `"wasm-component"`, `interface` to the identity of one of the
+component's top-level instance exports, and `wit_sha256` to the lowercase SHA-256
+checksum of the canonical WIT.
 Admission rejects `contract_sha256`.
 These are declarations. A compatible host's checker verifies the exported types;
 admission reads the declaration without instantiating the component.
@@ -162,17 +163,38 @@ single file it hashed, and an OCI release is named by its root manifest digest
 over one or more platform layers.
 
 Before each check the registry runs the checker with `--protocol`, with a
-5-second limit. A protocol 2 checker prints `2`; a protocol 1 checker treats the
-argument as a missing artifact, exits with status 1 and prints nothing. A probe
-that times out, ends by a signal or exits with any other status, such as a Go
-panic's 2, fails the check. Protocol 2 reports carry a required `runner_as_of`,
-the runner assessment date the checker used. The registry passes every protocol 2
-checker `--runner-as-of`. `check --plugin --version` passes the
-date of the version's earliest dated record. Admission, unpublished checks and
-versions without a dated record pass the current UTC date, taken before the
-checker starts. The registry rejects a protocol 2 report whose date differs from
-the date it passed. A protocol 1 checker receives no date and its records stay
-undated.
+5-second limit. A protocol 2 or 3 checker prints its version; a protocol 1
+checker treats the argument as a missing artifact, exits with status 1 and prints
+nothing. A probe that times out, ends by a signal or exits with any other status,
+such as a Go panic's 2, fails the check. Protocol 2 and 3 reports carry a
+required `runner_as_of`, the runner assessment date the checker used. The
+registry passes every protocol 2 and 3 checker `--runner-as-of`.
+`check --plugin --version` passes the date of the version's earliest dated
+record. Admission, unpublished checks and versions without a dated record pass
+the current UTC date, taken before the checker starts. The registry rejects a
+report whose date differs from the date it passed. A protocol 1 checker receives
+no date and its records stay undated.
+
+A protocol 3 report on a component can list the component's `imports` and
+`exports`. `imports` holds every top-level import name, spelled exactly as in the
+binary. `exports` holds the top-level exports whose kind is an instance. A report
+carries both lists or neither. Export copies both lists into the component's
+version entry in its plugin `index.json`:
+
+```json
+{
+  "version": "v1.2.0",
+  "record": "versions/<sha256(tag)>.json",
+  "compatibility": [],
+  "imports": ["kjanat:actionlint/invocation-context@0.2.0"],
+  "exports": ["kjanat:actionlint/analyzer@0.2.0"]
+}
+```
+
+The entry omits both lists when no report for the release lists them, or when
+the reports disagree. actionlint then checks the downloaded bytes. Running
+`check --plugin --version` with a protocol 3 checker over a published version
+adds the lists to its entry.
 
 For release preparation, the [shared candidate check](publishing.md) also installs
 the exact local bytes through actionlint and executes a publisher-supplied fixture.

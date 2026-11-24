@@ -48,8 +48,8 @@ func CheckCompatibility(ctx context.Context, executable, path string, entry Entr
 
 // CheckArtifact observes a local candidate without requiring publication. The
 // caller supplies the inspected digest; the checker receives a verified snapshot.
-// A protocol 2 checker receives runnerAsOf, or the current UTC date when it is
-// empty, and must report that date. A protocol 1 checker receives no date.
+// A protocol 2 or later checker receives runnerAsOf, or the current UTC date when
+// it is empty, and must report that date. A protocol 1 checker receives no date.
 func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runnerAsOf string) (evidence compatibility.Evidence, err error) {
 	executable, err = filepath.Abs(executable)
 	if err != nil {
@@ -130,15 +130,17 @@ func checkerProtocol(ctx context.Context, checkerPath, dir string) (int, error) 
 	switch {
 	case ctx.Err() != nil:
 		return 0, fmt.Errorf("checker protocol probe did not finish: %w", errors.Join(ctx.Err(), err))
-	case err == nil && answer == strconv.Itoa(compatibility.ProtocolVersion):
-		return compatibility.ProtocolVersion, nil
 	case errors.As(err, &exit) && exit.Exited() && exit.ExitCode() == 1 && answer == "":
 		return 1, nil
 	case err != nil:
 		return 0, fmt.Errorf("checker protocol probe failed: %w", err)
-	default:
-		return 0, fmt.Errorf("unsupported checker protocol %q", answer)
 	}
+	for version := 2; version <= compatibility.ProtocolVersion; version++ {
+		if answer == strconv.Itoa(version) {
+			return version, nil
+		}
+	}
+	return 0, fmt.Errorf("unsupported checker protocol %q", answer)
 }
 
 func checkerCommand(ctx context.Context, checkerPath, dir string, stdout io.Writer, args ...string) *exec.Cmd {

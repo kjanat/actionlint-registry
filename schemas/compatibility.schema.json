@@ -22,6 +22,17 @@
       },
       "additionalProperties": false
     },
+    "interfaces": {
+      "description": "Top-level component interface names, spelled as in the binary.",
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^[^\\u0000\\r\\n]*$"
+      }
+    },
     "report": {
       "type": "object",
       "required": [
@@ -32,6 +43,14 @@
         "policy",
         "schema_version"
       ],
+      "dependentRequired": {
+        "exports": [
+          "imports"
+        ],
+        "imports": [
+          "exports"
+        ]
+      },
       "properties": {
         "artifact_sha256": {
           "type": "string",
@@ -50,8 +69,16 @@
           "type": "string",
           "maxLength": 16384
         },
+        "exports": {
+          "$ref": "#/$defs/interfaces",
+          "description": "The component's top-level exports whose kind is an instance."
+        },
         "host": {
           "$ref": "#/$defs/host"
+        },
+        "imports": {
+          "$ref": "#/$defs/interfaces",
+          "description": "Every top-level import of the component."
         },
         "outcome": {
           "enum": [
@@ -73,7 +100,8 @@
         "schema_version": {
           "enum": [
             1,
-            2
+            2,
+            3
           ]
         }
       },
@@ -112,19 +140,35 @@
           "if": {
             "properties": {
               "schema_version": {
-                "const": 2
+                "const": 1
               }
             }
           },
           "then": {
+            "not": {
+              "required": [
+                "runner_as_of"
+              ]
+            }
+          },
+          "else": {
             "required": [
               "runner_as_of"
             ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "schema_version": {
+                "const": 3
+              }
+            }
           },
           "else": {
             "not": {
               "required": [
-                "runner_as_of"
+                "imports"
               ]
             }
           }

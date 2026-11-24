@@ -299,9 +299,9 @@ func TestRecheckGivesProtocol1CheckerNoDate(t *testing.T) {
 
 func TestCheckRejectsUnknownCheckerProtocol(t *testing.T) {
 	_, _, entry, _, path := recheckFixture(t, "passed")
-	checker, _ := shellChecker(t, 3, "{}")
+	checker, _ := shellChecker(t, 4, "{}")
 	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "unsupported checker protocol") {
-		t.Fatalf("protocol 3 checker was called: %v", err)
+		t.Fatalf("protocol 4 checker was called: %v", err)
 	}
 }
 
@@ -336,5 +336,25 @@ func TestCheckRejectsPanickingProtocolProbe(t *testing.T) {
 	checker := writeShellChecker(t, t.TempDir(), panickingCheckerVariable+"=1 exec '"+executable+"' \"$@\"\n")
 	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "checker protocol probe failed: exit status 2") {
 		t.Fatalf("panicking probe was not reported as a probe failure: %v", err)
+	}
+}
+
+func TestCheckKeepsProtocol3Interfaces(t *testing.T) {
+	_, _, entry, _, path := recheckFixture(t, "passed")
+	imports, exports := []string{"wasi:cli/environment@0.2.0"}, []string{"kjanat:actionlint/analyzer@0.2.0"}
+	report := func(version int) string {
+		return fmt.Sprintf(`{"schema_version":%d,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v3"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s","imports":[%q],"exports":[%q]}`, version, entry.Submission.SHA256, imports[0], exports[0])
+	}
+	checker, _ := shellChecker(t, 3, report(3))
+	evidence, err := CheckCompatibility(t.Context(), checker, path, entry, "2026-12-08")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Report.SchemaVersion != 3 || !slices.Equal(evidence.Report.Imports, imports) || !slices.Equal(evidence.Report.Exports, exports) {
+		t.Fatalf("protocol 3 evidence lost its interfaces: %+v", evidence.Report)
+	}
+	checker, _ = shellChecker(t, 2, report(2))
+	if _, err := CheckCompatibility(t.Context(), checker, path, entry, "2026-12-08"); err == nil {
+		t.Fatal("protocol 2 report with interfaces became evidence")
 	}
 }
