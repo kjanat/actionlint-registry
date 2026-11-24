@@ -62,13 +62,13 @@ func TestCheckerReportKeepsRunnerAssessmentDate(t *testing.T) {
 	}
 	sum := sha256.Sum256([]byte("candidate"))
 	digest := hex.EncodeToString(sum[:])
-	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v2"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["host-resolution"],"runner_as_of":%q}`, digest, today())
+	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v2"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["host-resolution"],"runner_as_of":"%%s"}`, digest)
 	checker, _ := shellChecker(t, 2, report)
-	evidence, err := CheckArtifact(t.Context(), checker, path, digest, "")
+	evidence, err := CheckArtifact(t.Context(), checker, path, digest, "2026-12-08")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evidence.Report.SchemaVersion != 2 || evidence.Report.RunnerAsOf != today() {
+	if evidence.Report.SchemaVersion != 2 || evidence.Report.RunnerAsOf != "2026-12-08" {
 		t.Fatalf("checker report lost its protocol or runner assessment date: %+v", evidence.Report)
 	}
 }

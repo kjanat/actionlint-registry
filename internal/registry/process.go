@@ -115,21 +115,27 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runner
 	return evidence, evidence.Validate()
 }
 
+var checkerProbeTimeout = 5 * time.Second
+
 // checkerProtocol asks the checker for its protocol version. A protocol 1
 // checker treats the probe as a missing artifact: it exits non-zero and prints
 // nothing to stdout.
 func checkerProtocol(ctx context.Context, checkerPath, dir string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, checkerProbeTimeout)
+	defer cancel()
 	stdout := &boundedBuffer{limit: 64}
 	err := checkerCommand(ctx, checkerPath, dir, stdout, compatibility.ProtocolProbe).Run()
 	answer := strings.TrimSpace(string(stdout.Bytes()))
 	var exit *exec.ExitError
 	switch {
+	case ctx.Err() != nil:
+		return 0, fmt.Errorf("checker protocol probe did not finish: %w", errors.Join(ctx.Err(), err))
 	case err == nil && answer == strconv.Itoa(compatibility.ProtocolVersion):
 		return compatibility.ProtocolVersion, nil
-	case errors.As(err, &exit) && answer == "":
+	case errors.As(err, &exit) && exit.Exited() && exit.ExitCode() > 0 && answer == "":
 		return 1, nil
 	case err != nil:
-		return 0, fmt.Errorf("checker protocol probe: %w", err)
+		return 0, fmt.Errorf("checker protocol probe failed: %w", err)
 	default:
 		return 0, fmt.Errorf("unsupported checker protocol %q", answer)
 	}

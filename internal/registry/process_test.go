@@ -112,8 +112,6 @@ func TestCheckerFailuresNeverMutateAdmission(t *testing.T) {
 
 const foreignDateFixture = "2001-01-01"
 
-func today() string { return time.Now().UTC().Format(time.DateOnly) }
-
 func recheckFixture(t *testing.T, content string, stored ...compatibility.Evidence) (EvidenceStore, Index, Entry, string, string) {
 	t.Helper()
 	executable, err := os.Executable()
@@ -151,23 +149,30 @@ func datedObservation(entry Entry, runnerAsOf string, observedAt time.Time) comp
 	return evidence
 }
 
+// dayOfCheck reports whether date is the UTC day at start or now, so a check
+// that runs across midnight still matches.
+func dayOfCheck(start time.Time, date string) bool {
+	return date == start.UTC().Format(time.DateOnly) || date == time.Now().UTC().Format(time.DateOnly)
+}
+
 func TestRecheckRecordsTodayWithoutStoredDate(t *testing.T) {
 	entry := acceptedFixture(t)
 	for name, stored := range map[string][]compatibility.Evidence{"no evidence": nil, "undated evidence": {observation(entry, "passed")}} {
 		t.Run(name, func(t *testing.T) {
 			store, index, entry, executable, path := recheckFixture(t, "passed", stored...)
+			start := time.Now()
 			evidence, err := store.Recheck(t.Context(), index, executable, path, entry)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if evidence.Report.RunnerAsOf != today() {
-				t.Fatalf("recheck did not use the checker's current date: %+v", evidence.Report)
+			if !dayOfCheck(start, evidence.Report.RunnerAsOf) {
+				t.Fatalf("recheck did not use the current date: %+v", evidence.Report)
 			}
 			recorded, err := store.Load(index)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.ContainsFunc(recorded, func(e compatibility.Evidence) bool { return e.Report.RunnerAsOf == today() }) {
+			if !slices.ContainsFunc(recorded, func(e compatibility.Evidence) bool { return e.Report.RunnerAsOf == evidence.Report.RunnerAsOf }) {
 				t.Fatalf("recheck did not record its date: %+v", recorded)
 			}
 		})
@@ -210,17 +215,18 @@ func TestRecheckRejectsCheckerIgnoringStoredDate(t *testing.T) {
 
 func TestCheckRejectsDateOtherThanRegistryDate(t *testing.T) {
 	_, _, entry, executable, path := recheckFixture(t, "ignores-date")
-	if _, err := CheckCompatibility(t.Context(), executable, path, entry, ""); err == nil || !strings.Contains(err.Error(), "instead of \""+today()+"\"") {
+	if _, err := CheckCompatibility(t.Context(), executable, path, entry, ""); err == nil || !strings.Contains(err.Error(), "\""+foreignDateFixture+"\" instead of") {
 		t.Fatalf("report dated %s was accepted without a requested date: %v", foreignDateFixture, err)
 	}
 }
 
 func TestCheckPassesTodayToProtocol2Checker(t *testing.T) {
 	_, _, entry, _, path := recheckFixture(t, "passed")
-	date := today()
-	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v2"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":%q}`, entry.Submission.SHA256, date)
+	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v2"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s"}`, entry.Submission.SHA256)
 	checker, argsLog := shellChecker(t, 2, report)
-	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err != nil {
+	start := time.Now()
+	evidence, err := CheckCompatibility(t.Context(), checker, path, entry, "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(argsLog)
@@ -228,32 +234,42 @@ func TestCheckPassesTodayToProtocol2Checker(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(calls) != 2 || calls[0] != compatibility.ProtocolProbe || !strings.HasPrefix(calls[1], "--runner-as-of "+date+" ") {
-		t.Fatalf("protocol 2 checker did not receive the registry's date: %q", calls)
+	fields := strings.Fields(calls[len(calls)-1])
+	if len(calls) != 2 || calls[0] != compatibility.ProtocolProbe || len(fields) != 3 || fields[0] != "--runner-as-of" || !dayOfCheck(start, fields[1]) || evidence.Report.RunnerAsOf != fields[1] {
+		t.Fatalf("protocol 2 checker did not receive the registry's date: %q, %+v", calls, evidence.Report)
 	}
 }
 
 // shellChecker writes a POSIX shell checker that logs its arguments. A protocol
 // 1 checker accepts exactly one existing artifact path, like the original
-// checker; protocol 2 and later answer the probe and accept --runner-as-of.
+// checker, and prints report. Protocol 2 and later answer the probe, accept
+// --runner-as-of, and print report as a printf format with the date as its
+// only argument.
 func shellChecker(t *testing.T, protocol int, report string) (string, string) {
+	t.Helper()
+	directory := t.TempDir()
+	argsLog := filepath.Join(directory, "args.log")
+	script := "printf '%s\\n' \"$*\" >> '" + argsLog + "'\n"
+	if protocol > 1 {
+		script += fmt.Sprintf("if [ \"$1\" = %s ]; then printf '%%s\\n' %d; exit 0; fi\n", compatibility.ProtocolProbe, protocol)
+		script += "if [ \"$1\" = --runner-as-of ]; then date=$2; shift 2; fi\n"
+		script += "[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '" + report + "\\n' \"$date\"\n"
+	} else {
+		script += "[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '%s\\n' '" + report + "'\n"
+	}
+	return writeShellChecker(t, directory, script), argsLog
+}
+
+func writeShellChecker(t *testing.T, directory, body string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake checker is a POSIX shell script")
 	}
-	directory := t.TempDir()
-	argsLog := filepath.Join(directory, "args.log")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\n"
-	if protocol > 1 {
-		script += fmt.Sprintf("if [ \"$1\" = %s ]; then printf '%%s\\n' %d; exit 0; fi\n", compatibility.ProtocolProbe, protocol)
-		script += "if [ \"$1\" = --runner-as-of ]; then shift 2; fi\n"
-	}
-	script += "[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '%s\\n' '" + report + "'\n"
 	path := filepath.Join(directory, "checker")
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return path, argsLog
+	return path
 }
 
 func TestRecheckGivesProtocol1CheckerNoDate(t *testing.T) {
@@ -283,5 +299,23 @@ func TestCheckRejectsUnknownCheckerProtocol(t *testing.T) {
 	checker, _ := shellChecker(t, 3, "{}")
 	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "unsupported checker protocol") {
 		t.Fatalf("protocol 3 checker was called: %v", err)
+	}
+}
+
+func TestCheckRejectsAbnormalProtocolProbe(t *testing.T) {
+	timeout := checkerProbeTimeout
+	t.Cleanup(func() { checkerProbeTimeout = timeout })
+	checkerProbeTimeout = 200 * time.Millisecond
+	_, _, entry, _, path := recheckFixture(t, "passed")
+	for name, body := range map[string]string{
+		"timeout": "while :; do :; done\n",
+		"signal":  "kill -KILL $$\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			checker := writeShellChecker(t, t.TempDir(), body)
+			if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "checker protocol probe") {
+				t.Fatalf("abnormal probe was not reported as a probe failure: %v", err)
+			}
+		})
 	}
 }
