@@ -271,11 +271,12 @@ conflicting tool when replacing it, for example `--no-tool=shellcheck`.
 
 ### Plugin configuration schemas
 
-The [plugin configuration catalog](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.catalog.json)
-lists plugin selectors and maps each release tag in `versions` to its JSON Schema.
-Use the release schema to validate that plugin's declared settings in an actionlint
-configuration. `url` points to the newest active release with a schema, or the
-newest release with a schema if none are active.
+To validate a plugin's settings in your actionlint config, find the plugin by
+selector in the [catalog](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.catalog.json)
+and look up its release tag in `versions`.
+
+`url` links to the schema for the newest active release that has one. If no
+active release has a schema, it links to the newest release that does.
 
 ### Registry schema
 
