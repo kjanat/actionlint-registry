@@ -6,22 +6,22 @@
     "packages": ["site", "worker"],
     "catalog": {
       "@kjanat/dreamcli": "https://pkg.pr.new/@kjanat/dreamcli@f57e4b5",
-      "@types/bun": "1.4.4",
-      "@types/node": "26.6.5",
+      "@types/bun": "1.4.5",
+      "@types/node": "26.6.7",
       "typescript": "7.0.2"
     },
     "catalogs": {
       "site": {
-        "playwright": "1.64.1",
-        "preact": "11.0.2",
-        "preact-render-to-string": "6.8.1",
+        "playwright": "1.65.1",
+        "preact": "11.2.0",
+        "preact-render-to-string": "6.8.3",
         "zod": "4.6.7"
       },
       "worker": {
-        "@biomejs/biome": "2.6.3",
-        "jose": "6.2.13",
+        "@biomejs/biome": "2.6.9",
+        "jose": "6.2.18",
         "miniflare": "5.20261019.2-beta",
-        "wrangler": "4.152.0"
+        "wrangler": "4.168.0"
       }
     }
   },

@@ -75,19 +75,17 @@ describe('public registry JSON projection', () => {
 			fixture('Zero', 0),
 			{
 				name: 'Partial',
-				versions: [{ version: 'v1', publishedAt: '2026-01-01T00:00:00Z', count: 30 }, {
-					version: 'v2',
-					publishedAt: '2026-01-02T00:00:00Z',
-					count: null,
-				}],
+				versions: [
+					{ version: 'v1', publishedAt: '2026-01-01T00:00:00Z', count: 30 },
+					{ version: 'v2', publishedAt: '2026-01-02T00:00:00Z', count: null },
+				],
 			},
 			{
 				name: 'Overflow',
-				versions: [{ version: 'v1', publishedAt: '2026-01-01T00:00:00Z', count: Number.MAX_SAFE_INTEGER }, {
-					version: 'v2',
-					publishedAt: '2026-01-02T00:00:00Z',
-					count: 1,
-				}],
+				versions: [
+					{ version: 'v1', publishedAt: '2026-01-01T00:00:00Z', count: Number.MAX_SAFE_INTEGER },
+					{ version: 'v2', publishedAt: '2026-01-02T00:00:00Z', count: 1 },
+				],
 			},
 		]);
 		expect((await loadCatalogue(directory)).plugins.map(plugin => plugin.downloads)).toEqual([
@@ -153,10 +151,10 @@ describe('public registry JSON projection', () => {
 			],
 		}, fixture('No alias')]);
 		const data = await loadCatalogue(directory);
-		expect(data.plugins[0]?.releases.map(release => [release.reference, release.state])).toEqual([[
-			'curated@v2',
-			'revoked',
-		], ['curated@v1', 'revoked']]);
+		expect(data.plugins[0]?.releases.map(release => [release.reference, release.state])).toEqual([
+			['curated@v2', 'revoked'],
+			['curated@v1', 'revoked'],
+		]);
 		expect(data.plugins[1]?.releases[0]?.reference).toBe('github.com/publisher/plugin-2@v1.0.0');
 	});
 

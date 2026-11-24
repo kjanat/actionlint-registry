@@ -255,7 +255,7 @@ export interface Authorization {
 export async function body(request: Request): Promise<unknown> {
 	if (
 		request.headers.get('content-type')?.split(';')[0]?.trim()
-			!== 'application/json'
+		!== 'application/json'
 	) {
 		throw new HttpError(415, 'Set the Content-Type header to application/json.');
 	}

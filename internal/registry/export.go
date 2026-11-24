@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"registry.actionlint.kjanat.dev/internal/compatibility"
+	"registry.actionlint.kjanat.dev/schemas"
 )
 
 func Find(index Index, repository, tag string) (Entry, error) {
@@ -99,6 +100,10 @@ func Export(index Index, directory string, statuses []ReleaseStatus, aliases *Al
 }
 
 func export(index Index, directory string, statuses []ReleaseStatus, downloads *DownloadSnapshot, aliases *Aliases, evidence ...compatibility.Evidence) error {
+	schema, err := schemas.Bundle()
+	if err != nil {
+		return err
+	}
 	if aliases != nil {
 		if err := aliases.Validate(index); err != nil {
 			return err
@@ -170,7 +175,7 @@ func export(index Index, directory string, statuses []ReleaseStatus, downloads *
 			return err
 		}
 	}
-	return nil
+	return WriteJSON(filepath.Join(directory, "schemas", "registry.schema.json"), schema)
 }
 
 func writeCatalog(directory string, catalog Catalog) error {

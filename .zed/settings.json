@@ -42,15 +42,15 @@
     "dprint": {
       "binary": {
         "path": "mise",
-        "arguments": ["exec", "--silent", "github:kjanat/dprint@latest", "--", "dprint", "lsp"],
-        "env": {},
+        "arguments": ["exec", "--silent", "--", "kprint", "lsp"],
+        "env": {}
       }
     },
     "gopls": {
       "binary": {
         "path": "go",
         "arguments": ["run", "golang.org/x/tools/gopls@latest"],
-        "env": { "MISE_SILENT": "1" },
+        "env": { "MISE_SILENT": "1" }
       },
       "initialization_options": {
         "buildFlags": ["-buildvcs=true"],
@@ -63,7 +63,7 @@
           "ignoredError": true,
           "parameterNames": true,
           "constantValues": true,
-          "functionTypeParameters": true,
+          "functionTypeParameters": true
         },
         "hoverKind": "SynopsisDocumentation"
       }
@@ -93,7 +93,7 @@
       "binary": {
         "path": "mise",
         "arguments": ["exec", "--silent", "biome@latest", "--", "biome", "lsp-proxy"],
-        "env": {},
+        "env": {}
       },
       "settings": {
         "config_path": "./worker/biome.json",
