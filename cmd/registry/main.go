@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"registry.actionlint.kjanat.dev/internal/artifact"
+	"registry.actionlint.kjanat.dev/internal/compatibility"
 	"registry.actionlint.kjanat.dev/internal/registry"
 )
 
@@ -43,6 +44,7 @@ func run(ctx context.Context, args []string) error {
 	pluginID := flags.String("plugin", "", "Identify the plugin by provider/repository or host/repository.")
 	checker := flags.String("checker", "", "Trusted checker executable; check records an observation and admit rejects a failed outcome.")
 	evidencePath := flags.String("compatibility", "registry/compatibility", "Read or append host compatibility observations in this directory.")
+	candidateEvidencePath := flags.String("candidate-compatibility", "", "Merge the compatibility observations that admission wrote to this directory.")
 	version := flags.String("version", "", "Resolve this exact accepted release tag.")
 	statusPath := flags.String("statuses", "registry/status", "Read or append audited release status events.")
 	state := flags.String("status", "", "Set active, deprecated, withdrawn or revoked.")
@@ -200,7 +202,24 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		var evidence []compatibility.Evidence
+		if *candidateEvidencePath != "" {
+			if evidence, err = (registry.EvidenceStore{Directory: *candidateEvidencePath}).Load(candidate); err != nil {
+				return err
+			}
+		}
 		mergeErr := store.Merge(candidate)
+		if mergeErr == nil && len(evidence) != 0 {
+			merged, err := store.Load()
+			if err != nil {
+				return err
+			}
+			for _, observation := range evidence {
+				if mergeErr = (registry.EvidenceStore{Directory: *evidencePath}).Add(merged, observation); mergeErr != nil {
+					break
+				}
+			}
+		}
 		if *reportPath != "" {
 			report := registry.NewReport("merge")
 			for _, entry := range candidate.Entries {
@@ -243,7 +262,8 @@ func run(ctx context.Context, args []string) error {
 		service := registry.Service{Providers: providers, Checker: *checker}
 		report := registry.NewReport("admit")
 		report.SubmissionID = receipt.ID
-		entry, admissionErr := service.Admit(ctx, &index, receipt)
+		admission, admissionErr := service.Admit(ctx, &index, receipt)
+		entry := admission.Entry
 		if admissionErr == nil {
 			delta := registry.EmptyIndex()
 			if err = delta.Add(entry); err != nil {
@@ -254,6 +274,9 @@ func run(ctx context.Context, args []string) error {
 				destination.Directory = *candidatePath
 			}
 			admissionErr = destination.Merge(delta)
+			if admissionErr == nil && admission.Evidence != nil {
+				admissionErr = (registry.EvidenceStore{Directory: *evidencePath}).Add(delta, *admission.Evidence)
+			}
 		}
 		if admissionErr == nil {
 			report.Accepted = append(report.Accepted, entry)

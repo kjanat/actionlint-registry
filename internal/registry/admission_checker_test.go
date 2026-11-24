@@ -38,10 +38,13 @@ func TestAdmissionRejectsFailedCompatibility(t *testing.T) {
 				Checker: test.checker,
 			}
 			index := EmptyIndex()
-			_, err := service.Admit(t.Context(), &index, sampleReceipt())
+			admission, err := service.Admit(t.Context(), &index, sampleReceipt())
 			if test.admit {
 				if err != nil {
 					t.Fatal(err)
+				}
+				if admission.Evidence == nil || admission.Evidence.Report.Outcome != name || admission.Evidence.Report.ArtifactSHA256 != digest {
+					t.Fatalf("admission dropped its compatibility evidence: %+v", admission.Evidence)
 				}
 				return
 			}

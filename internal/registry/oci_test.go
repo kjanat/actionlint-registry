@@ -317,7 +317,7 @@ func TestProcessReleaseAssetAdmission(t *testing.T) {
 			entry := Entry{Submission: receipt.Submission, RepositoryID: 10, OwnerID: 5, ReleaseID: 20, AssetID: 30, Commit: receipt.Identity.Commit, PublishedAt: time.Now().UTC(), UpstreamImmutable: true, URL: assetURL(receipt.Submission)}
 			service := Service{Providers: map[string]ReleaseProvider{"github": processReleaseProvider{entry: entry, data: data}}}
 			index := EmptyIndex()
-			admitted, err := service.Admit(t.Context(), &index, receipt)
+			admitted, err := admitEntry(service.Admit(t.Context(), &index, receipt))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -374,7 +374,7 @@ func TestOCISharedRepositoryKeepsPackageVersionsImmutable(t *testing.T) {
 		entry.UpstreamImmutable = false
 		entry.URL = reference
 		service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Inspect}
-		return service.Admit(t.Context(), &index, receipt)
+		return admitEntry(service.Admit(t.Context(), &index, receipt))
 	}
 	const firstID = "github.com/publisher/plugin/tools/first"
 	first, err := admit(firstID, "example")
@@ -408,7 +408,7 @@ func TestOCIAdmissionIdentityAndImmutability(t *testing.T) {
 	entry.URL = reference
 	service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Inspect}
 	index := EmptyIndex()
-	admitted, err := service.Admit(t.Context(), &index, receipt)
+	admitted, err := admitEntry(service.Admit(t.Context(), &index, receipt))
 	if err != nil {
 		t.Fatal(err)
 	}

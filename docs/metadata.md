@@ -150,7 +150,8 @@ The versioned [JSON report protocol](../schemas/compatibility.schema.json) recor
 `passed`, `failed`, or `unsupported` for a particular artifact, host revision, and
 policy. A checker crash produces no compatibility evidence. Missing evidence means
 untested. Admission and the shared candidate check reject `failed`; `unsupported`
-is admitted. No outcome changes an existing release record.
+is admitted. No outcome changes an existing release record. Admission stores its
+report under `registry/compatibility` together with the accepted record.
 
 Before each check the registry runs the checker with `--protocol`. A protocol 2
 checker prints `2`; a protocol 1 checker treats the argument as a missing

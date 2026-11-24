@@ -21,7 +21,7 @@ func acceptedFixture(t *testing.T) Entry {
 		return sampleDeclaration(), nil
 	}}
 	index := EmptyIndex()
-	entry, err := service.Admit(t.Context(), &index, sampleReceipt())
+	entry, err := admitEntry(service.Admit(t.Context(), &index, sampleReceipt()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,3 +176,5 @@ func TestGitLabPublication(t *testing.T) {
 		t.Fatal("GitLab redirect accepted")
 	}
 }
+
+func admitEntry(admission Admission, err error) (Entry, error) { return admission.Entry, err }

@@ -32,6 +32,7 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "test-token")
 	root := t.TempDir()
+	today := time.Now().UTC().Format(time.DateOnly)
 	storePath := filepath.Join(root, "registry/plugins")
 	candidatePath := filepath.Join(root, "candidate/plugins")
 	receiptPath := filepath.Join(root, "handoff/receipt.json")
@@ -119,8 +120,9 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 		wasm = append(wasm, section...)
 		digest := sha256.Sum256(wasm)
 		receipt.Submission.SHA256 = hex.EncodeToString(digest[:])
-		report := fmt.Sprintf(`{"schema_version":1,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"]}`, receipt.Submission.SHA256)
-		if err := os.WriteFile(filepath.Join(root, "registry-checker"), []byte("#!/bin/sh\n[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '%s\\n' '"+report+"'\n"), 0o700); err != nil {
+		report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":%q}`, receipt.Submission.SHA256, today)
+		script := "#!/bin/sh\nif [ \"$1\" = --protocol ]; then printf '2\\n'; exit 0; fi\n[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '%s\\n' '" + report + "'\n"
+		if err := os.WriteFile(filepath.Join(root, "registry-checker"), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		receipt.Submission.Tag = "v" + version
@@ -163,8 +165,27 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 	if err != nil || len(candidate.Entries) != 1 || candidate.Entries[0].Submission.Tag != "v1.1.0" {
 		t.Fatalf("wrong admission delta: %+v, %v", candidate, err)
 	}
+	admitted, err := (registry.EvidenceStore{Directory: filepath.Join(root, "candidate/compatibility")}).Load(candidate)
+	if err != nil || len(admitted) != 1 || admitted[0].Report.RunnerAsOf != today {
+		t.Fatalf("admission did not store its dated evidence: %+v, %v", admitted, err)
+	}
 	if err = (registry.Store{Directory: filepath.Join(root, "accepted/candidate/plugins")}).Merge(candidate); err != nil {
 		t.Fatal(err)
+	}
+	if err = (registry.EvidenceStore{Directory: filepath.Join(root, "accepted/candidate/compatibility")}).Add(candidate, admitted[0]); err != nil {
+		t.Fatal(err)
+	}
+	published := filepath.Join(root, "published")
+	if err = run(t.Context(), []string{"merge", "--store", filepath.Join(published, "plugins"), "--candidate", filepath.Join(root, "accepted/candidate/plugins"),
+		"--compatibility", filepath.Join(published, "compatibility"), "--candidate-compatibility", filepath.Join(root, "accepted/candidate/compatibility")}); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := (registry.Store{Directory: filepath.Join(published, "plugins")}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := (registry.EvidenceStore{Directory: filepath.Join(published, "compatibility")}).Load(merged); err != nil || len(stored) != 1 || stored[0].Report.RunnerAsOf != today {
+		t.Fatalf("merge did not publish the admission evidence: %+v, %v", stored, err)
 	}
 	conflict := candidate.Entries[0]
 	conflict.AssetID++
@@ -174,6 +195,9 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 	err = run(t.Context(), mergeArgs)
 	if err == nil || registry.FailureDisposition(err) != "rejected" {
 		t.Fatalf("publication conflict was not rejected: %v", err)
+	}
+	if _, err = os.Stat(filepath.Join(root, "registry/compatibility", candidate.Entries[0].Submission.SHA256)); !os.IsNotExist(err) {
+		t.Fatalf("rejected publication stored admission evidence: %v", err)
 	}
 	data, err = os.ReadFile(filepath.Join(root, "reports/publication.json"))
 	if err != nil {

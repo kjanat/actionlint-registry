@@ -67,25 +67,31 @@ type Service struct {
 	Checker    string
 }
 
-func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt) (Entry, error) {
+// Admission is an accepted entry and, when a checker ran, the evidence it produced.
+type Admission struct {
+	Entry    Entry
+	Evidence *compatibility.Evidence
+}
+
+func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt) (Admission, error) {
 	if err := receipt.Validate(); err != nil {
-		return Entry{}, err
+		return Admission{}, err
 	}
 	s := receipt.Submission
 	provider, ok := service.Providers[s.Provider]
 	if !ok {
-		return Entry{}, errors.New("unsupported release provider")
+		return Admission{}, errors.New("unsupported release provider")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	release, err := provider.ResolveRelease(ctx, s)
 	if err != nil {
-		return Entry{}, err
+		return Admission{}, err
 	}
 	entry := release.Entry
 	entry.Receipt = receipt
 	if strconv.FormatInt(entry.RepositoryID, 10) != receipt.Identity.RepositoryID || strconv.FormatInt(entry.OwnerID, 10) != receipt.Identity.OwnerID || entry.Commit != receipt.Identity.Commit {
-		return Entry{}, reject("release identity or commit disagrees with OIDC publisher")
+		return Admission{}, reject("release identity or commit disagrees with OIDC publisher")
 	}
 	for _, old := range index.Entries {
 		if old.Receipt.PluginKey() != receipt.PluginKey() && (old.Submission.Provider != s.Provider || !strings.EqualFold(old.Submission.Repository, s.Repository)) {
@@ -94,15 +100,16 @@ func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt)
 		if old.Receipt.PluginKey() != receipt.PluginKey() || old.OwnerID != entry.OwnerID ||
 			old.RepositoryID != entry.RepositoryID || old.Submission.Provider != s.Provider ||
 			old.Submission.Repository != s.Repository {
-			return Entry{}, reject("registered publisher identity changed")
+			return Admission{}, reject("registered publisher identity changed")
 		}
 		if old.Submission == s {
 			if old.ReleaseID != entry.ReleaseID || old.AssetID != entry.AssetID || old.Commit != entry.Commit || old.URL != entry.URL {
-				return Entry{}, reject("accepted version is immutable")
+				return Admission{}, reject("accepted version is immutable")
 			}
-			return old, nil
+			return Admission{Entry: old}, nil
 		}
 	}
+	var evidence *compatibility.Evidence
 	declaration, err := func() (result artifact.Declaration, err error) {
 		if s.IsOCI() {
 			inspect := service.InspectOCI
@@ -129,23 +136,26 @@ func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt)
 			err = validateStandaloneProcess(path)
 		}
 		if err == nil && service.Checker != "" {
-			var evidence compatibility.Evidence
-			evidence, err = CheckArtifact(ctx, service.Checker, path, s.Digest(), "")
-			if err == nil && evidence.Report.Outcome == "failed" {
-				err = reject("compatibility check failed: " + evidence.Report.Detail)
+			var observed compatibility.Evidence
+			observed, err = CheckArtifact(ctx, service.Checker, path, s.Digest(), "")
+			if err == nil && observed.Report.Outcome == "failed" {
+				err = reject("compatibility check failed: " + observed.Report.Detail)
+			}
+			if err == nil {
+				evidence = &observed
 			}
 		}
 		return result, err
 	}()
 	if err != nil {
-		return Entry{}, fmt.Errorf("plugin inspection: %w", err)
+		return Admission{}, fmt.Errorf("plugin inspection: %w", err)
 	}
 	if declaration.Kind != s.Kind {
-		return Entry{}, reject("binary kind disagrees with submission")
+		return Admission{}, reject("binary kind disagrees with submission")
 	}
 	expectedRepository := "https://" + s.Provider + ".com/" + s.Repository
 	if !strings.EqualFold(declaration.Repository, expectedRepository) || strings.TrimPrefix(declaration.PluginVersion, "v") != strings.TrimPrefix(s.Tag, "v") {
-		return Entry{}, reject("embedded repository or version disagrees with authenticated release")
+		return Admission{}, reject("embedded repository or version disagrees with authenticated release")
 	}
 	entry.RecordVersion = 2
 	entry.Artifact = &declaration
@@ -160,7 +170,7 @@ func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt)
 	}
 	entry.AcceptedAt = time.Now().UTC()
 	if err = index.Add(entry); err != nil {
-		return Entry{}, err
+		return Admission{}, err
 	}
-	return entry, nil
+	return Admission{Entry: entry, Evidence: evidence}, nil
 }

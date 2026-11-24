@@ -112,7 +112,7 @@ func TestAdmissionAndImmutableIdentity(t *testing.T) {
 		return artifact.Inspect(t.Context(), path)
 	}}
 	s := sampleSubmission()
-	entry, err := service.Admit(t.Context(), &index, sampleReceipt())
+	entry, err := admitEntry(service.Admit(t.Context(), &index, sampleReceipt()))
 	if err != nil {
 		t.Fatal(err)
 	}
