@@ -100,8 +100,8 @@ jobs:
         with: { no-cache: true }
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with: { version: 2026.11.10, install: false, cache: false }
-      - name: Install ORAS from mise.lock
-        run: mise install --locked oras
+      - name: Install the ORAS version pinned in mise.toml
+        run: mise install oras
       - name: Package two-platform fixture images
         id: layout
         run: |
