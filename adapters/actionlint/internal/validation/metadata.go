@@ -72,6 +72,7 @@ type embeddedMetadata struct {
 	Transport       string `json:"transport"`
 	Interface       string `json:"interface"`
 	WITSHA256       string `json:"wit_sha256"`
+	LegacyWITSHA256 string `json:"contract_sha256"`
 	Interfaces      map[string][]struct {
 		Version int    `json:"version"`
 		Export  string `json:"export"`
@@ -104,9 +105,10 @@ func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance
 		}
 	case pluginartifact.Component:
 		var contract struct {
-			Transport string `json:"transport"`
-			Interface string `json:"interface"`
-			Digest    string `json:"wit_sha256"`
+			Transport    string `json:"transport"`
+			Interface    string `json:"interface"`
+			Digest       string `json:"wit_sha256"`
+			LegacyDigest string `json:"contract_sha256"`
 		}
 		if err := jsonv2.Unmarshal(info.Metadata, &contract); err != nil {
 			return metadata, fmt.Errorf("component contract declaration: %w", err)
@@ -120,9 +122,13 @@ func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance
 		if !hostSupports(ctx, contract.Interface) {
 			return metadata, fmt.Errorf("%w: this host does not load %s", ErrUnsupportedContract, contract.Interface)
 		}
+		if contract.Digest != "" && contract.LegacyDigest != "" {
+			return metadata, errors.New("component metadata declares both wit_sha256 and contract_sha256")
+		}
+		digest := contract.Digest + contract.LegacyDigest
 		// Source hashes change with WIT comments. The host checks actual types;
 		// the declaration's digest identifies the publisher's source contract.
-		if _, err := hex.DecodeString(contract.Digest); err != nil || len(contract.Digest) != 64 || strings.ToLower(contract.Digest) != contract.Digest {
+		if _, err := hex.DecodeString(digest); err != nil || len(digest) != 64 || strings.ToLower(digest) != digest {
 			return metadata, errors.New("component contract digest must be a lowercase SHA-256")
 		}
 	default:
@@ -178,7 +184,7 @@ func (metadata embeddedMetadata) contract() string {
 	if metadata.Transport == "wasm-core-json" {
 		return "wasm-core-json/1"
 	}
-	return metadata.Interface + "#sha256=" + metadata.WITSHA256
+	return metadata.Interface + "#sha256=" + metadata.WITSHA256 + metadata.LegacyWITSHA256
 }
 
 func (declared *componentDeclaration) matches(actual checkinputs.Descriptor) error {

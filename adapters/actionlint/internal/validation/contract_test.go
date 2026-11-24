@@ -103,3 +103,18 @@ func TestReferenceResolverComponent(t *testing.T) {
 		t.Fatalf("wrong resolver evidence: %+v", result)
 	}
 }
+
+func TestAcceptedLegacyContractDigest(t *testing.T) {
+	legacy := strings.Replace(componentMetadata, `"wit_sha256"`, `"contract_sha256"`, 1)
+	result, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", legacy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Contract != component.AnalyzerInterface+"#sha256="+componentContractDigest {
+		t.Fatalf("legacy digest lost from the contract: %s", result.Contract)
+	}
+	both := strings.Replace(componentMetadata, `"wit_sha256"`, `"contract_sha256":"`+componentContractDigest+`","wit_sha256"`, 1)
+	if _, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", both)); err == nil || errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("accepted two contract digests: %v", err)
+	}
+}
