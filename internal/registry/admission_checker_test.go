@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/google/go-github/v93/github"
@@ -16,17 +15,10 @@ import (
 
 func fakeChecker(t *testing.T, digest, outcome, checks, detail string) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake checker is a POSIX shell script")
-	}
-	path := filepath.Join(t.TempDir(), "checker")
 	report := fmt.Sprintf(`{"schema_version":1,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"afaa8f8a5c53"},"policy":"actionlint-smoke/1","outcome":%q,"checks":%s%s}`, digest, outcome, checks, detail)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' '"+report+"'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	checker, _ := shellChecker(t, 1, report)
+	return checker
 }
-
 func TestAdmissionRejectsFailedCompatibility(t *testing.T) {
 	digest := sampleReceipt().Submission.Digest()
 	for name, test := range map[string]struct {
@@ -67,11 +59,13 @@ func TestCheckerReportKeepsRunnerAssessmentDate(t *testing.T) {
 	}
 	sum := sha256.Sum256([]byte("candidate"))
 	digest := hex.EncodeToString(sum[:])
-	evidence, err := CheckArtifact(t.Context(), fakeChecker(t, digest, "passed", `["host-resolution"]`, `,"runner_as_of":"2026-12-08"`), path, digest, "")
+	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v2"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["host-resolution"],"runner_as_of":%q}`, digest, today())
+	checker, _ := shellChecker(t, 2, report)
+	evidence, err := CheckArtifact(t.Context(), checker, path, digest, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evidence.Report.RunnerAsOf != "2026-12-08" {
-		t.Fatalf("checker report lost its runner assessment date: %+v", evidence.Report)
+	if evidence.Report.SchemaVersion != 2 || evidence.Report.RunnerAsOf != today() {
+		t.Fatalf("checker report lost its protocol or runner assessment date: %+v", evidence.Report)
 	}
 }

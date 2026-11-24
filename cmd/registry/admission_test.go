@@ -120,7 +120,7 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 		digest := sha256.Sum256(wasm)
 		receipt.Submission.SHA256 = hex.EncodeToString(digest[:])
 		report := fmt.Sprintf(`{"schema_version":1,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"]}`, receipt.Submission.SHA256)
-		if err := os.WriteFile(filepath.Join(root, "registry-checker"), []byte("#!/bin/sh\nprintf '%s\\n' '"+report+"'\n"), 0o700); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "registry-checker"), []byte("#!/bin/sh\n[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '%s\\n' '"+report+"'\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		receipt.Submission.Tag = "v" + version
@@ -195,8 +195,9 @@ func recheckReleaseWithStoredDate(t *testing.T, root, storePath string, entry re
 		t.Fatal(err)
 	}
 	argsLog := filepath.Join(root, "checker-args.log")
-	report := fmt.Sprintf(`{"schema_version":1,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s"}`, entry.Submission.SHA256)
-	script := "#!/bin/sh\ndate=2026-11-24\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\nif [ \"$1\" = --runner-as-of ]; then date=$2; fi\nprintf '" + report + "\\n' \"$date\"\n"
+	today := time.Now().UTC().Format(time.DateOnly)
+	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s"}`, entry.Submission.SHA256)
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\nif [ \"$1\" = --protocol ]; then printf '2\\n'; exit 0; fi\ndate=" + today + "\nif [ \"$1\" = --runner-as-of ]; then date=$2; fi\nprintf '" + report + "\\n' \"$date\"\n"
 	checker := filepath.Join(root, "dated-checker")
 	if err := os.WriteFile(checker, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -213,7 +214,7 @@ func recheckReleaseWithStoredDate(t *testing.T, root, storePath string, entry re
 		t.Fatal(err)
 	}
 	calls := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(calls) != 2 || strings.HasPrefix(calls[0], "--runner-as-of") || !strings.HasPrefix(calls[1], "--runner-as-of 2026-11-24 ") {
+	if len(calls) != 4 || calls[0] != "--protocol" || strings.HasPrefix(calls[1], "--runner-as-of") || calls[2] != "--protocol" || !strings.HasPrefix(calls[3], "--runner-as-of "+today+" ") {
 		t.Fatalf("recheck did not replay the stored runner date: %q", calls)
 	}
 }

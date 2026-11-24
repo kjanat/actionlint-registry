@@ -18,6 +18,8 @@ import (
 	"actionlint.kjanat.dev/v2/registry/validation/internal/validation"
 )
 
+const protocolVersion = 2
+
 type host struct {
 	Name     string `json:"name"`
 	Revision string `json:"revision"`
@@ -44,11 +46,16 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("actionlint-checker", flag.ContinueOnError)
 	asOfFlag := flags.String("runner-as-of", "", "Runner assessment date (YYYY-MM-DD); defaults to the current UTC date")
+	protocolFlag := flags.Bool("protocol", false, "Print the report protocol version and exit")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 1 {
-		return errors.New("usage: actionlint-checker [--runner-as-of YYYY-MM-DD] <local-artifact>")
+	if *protocolFlag && *asOfFlag == "" && flags.NArg() == 0 {
+		_, err := fmt.Println(protocolVersion)
+		return err
+	}
+	if *protocolFlag || flags.NArg() != 1 {
+		return errors.New("usage: actionlint-checker --protocol | [--runner-as-of YYYY-MM-DD] <local-artifact>")
 	}
 	asOf := lifecycle.DateOf(time.Now())
 	if *asOfFlag != "" {
@@ -74,7 +81,7 @@ func run(ctx context.Context, args []string) error {
 	if size > 64<<20 {
 		return errors.New("artifact exceeds 64 MiB")
 	}
-	reply := report{SchemaVersion: 1, ArtifactSHA256: hex.EncodeToString(hash.Sum(nil)), Host: host{Name: "actionlint", Revision: validation.HostCommit}, Policy: "actionlint-smoke/1", Outcome: "passed", Checks: []string{}, RunnerAsOf: asOf.String()}
+	reply := report{SchemaVersion: protocolVersion, ArtifactSHA256: hex.EncodeToString(hash.Sum(nil)), Host: host{Name: "actionlint", Revision: validation.HostCommit}, Policy: "actionlint-smoke/1", Outcome: "passed", Checks: []string{}, RunnerAsOf: asOf.String()}
 	result, err := validation.Validate(ctx, asOf, path)
 	if err != nil {
 		reply.Outcome = "failed"

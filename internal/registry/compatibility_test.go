@@ -157,21 +157,30 @@ func TestRegistryHasNoHostSDKDependency(t *testing.T) {
 	}
 }
 func TestCompatibilityReportStrictProtocol(t *testing.T) {
-	e := observation(acceptedFixture(t), "passed")
-	for _, mutate := range []func(*compatibility.Report){
-		func(r *compatibility.Report) { r.SchemaVersion = 99 },
-		func(r *compatibility.Report) { r.Outcome = "maybe" },
-		func(r *compatibility.Report) { r.Host.Revision = "" },
-		func(r *compatibility.Report) { r.Policy = "" },
-		func(r *compatibility.Report) { r.Checks = nil },
-		func(r *compatibility.Report) { r.RunnerAsOf = "2026-02-30" },
-		func(r *compatibility.Report) { r.RunnerAsOf = "2026-12-8" },
+	v1 := observation(acceptedFixture(t), "passed").Report
+	v2 := v1
+	v2.SchemaVersion, v2.RunnerAsOf = 2, "2026-12-08"
+	for _, valid := range []compatibility.Report{v1, v2} {
+		if err := valid.Validate(); err != nil {
+			t.Fatalf("valid protocol %d report rejected: %v", valid.SchemaVersion, err)
+		}
+	}
+	for name, mutate := range map[string]func(*compatibility.Report){
+		"unknown protocol":        func(r *compatibility.Report) { r.SchemaVersion = 3 },
+		"outcome":                 func(r *compatibility.Report) { r.Outcome = "maybe" },
+		"host":                    func(r *compatibility.Report) { r.Host.Revision = "" },
+		"policy":                  func(r *compatibility.Report) { r.Policy = "" },
+		"checks":                  func(r *compatibility.Report) { r.Checks = nil },
+		"protocol 2 without date": func(r *compatibility.Report) { r.RunnerAsOf = "" },
+		"impossible date":         func(r *compatibility.Report) { r.RunnerAsOf = "2026-02-30" },
+		"short date":              func(r *compatibility.Report) { r.RunnerAsOf = "2026-12-8" },
+		"protocol 1 with date":    func(r *compatibility.Report) { r.SchemaVersion = 1 },
 	} {
-		changed := e.Report
+		changed := v2
 		mutate(&changed)
 		if err := changed.Validate(); err == nil {
 			data, _ := json.Marshal(changed)
-			t.Fatalf("invalid report accepted: %s", data)
+			t.Fatalf("%s: invalid report accepted: %s", name, data)
 		}
 	}
 }

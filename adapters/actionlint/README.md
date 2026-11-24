@@ -13,7 +13,8 @@ go -C adapters/actionlint build -o ../../actionlint-checker .
 ```
 
 The executable accepts one local artifact path and writes one JSON compatibility
-report to stdout. The report's `runner_as_of` is the runner assessment date. It is
+report to stdout. It implements report protocol 2: `--protocol` prints `2`, and the
+report's `runner_as_of` is the runner assessment date. The date is
 the current UTC date unless `--runner-as-of YYYY-MM-DD` sets it; the registry's
 `check` command passes a stored date there. Run the checker through that command
 to verify the accepted artifact's checksum, isolate inherited credentials, and

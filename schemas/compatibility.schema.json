@@ -71,7 +71,10 @@
           "format": "date"
         },
         "schema_version": {
-          "const": 1
+          "enum": [
+            1,
+            2
+          ]
         }
       },
       "additionalProperties": false,
@@ -102,6 +105,27 @@
               "detail": {
                 "minLength": 1
               }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "schema_version": {
+                "const": 2
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "runner_as_of"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "runner_as_of"
+              ]
             }
           }
         }

@@ -150,11 +150,18 @@ The versioned [JSON report protocol](../schemas/compatibility.schema.json) recor
 `passed`, `failed`, or `unsupported` for a particular artifact, host revision, and
 policy. A checker crash produces no compatibility evidence. Missing evidence means
 untested. Admission and the shared candidate check reject `failed`; `unsupported`
-is admitted. No outcome changes an existing release record. `runner_as_of` records
-the runner assessment date the checker used. Admission and unpublished checks use
-the current UTC date. `check --plugin --version` reuses the date of the version's
-earliest dated report, or uses the current UTC date and records it when no report
-has one. The registry rejects a report whose date differs from the requested date.
+is admitted. No outcome changes an existing release record.
+
+Before each check the registry runs the checker with `--protocol`. A protocol 2
+checker prints `2`; a protocol 1 checker treats the argument as a missing
+artifact and exits with an error. Protocol 2 reports carry a required
+`runner_as_of`, the runner assessment date the checker used. Admission and
+unpublished checks use the current UTC date. `check --plugin --version` passes
+`--runner-as-of` with the date of the version's earliest dated record, or uses the
+current UTC date when no record has one. The registry rejects a protocol 2 report
+whose date differs from the requested date, or from the UTC day of the observation
+when no date was requested. A protocol 1 checker receives no date and its records
+stay undated.
 
 For release preparation, the [shared candidate check](publishing.md) also installs
 the exact local bytes through actionlint and executes a publisher-supplied fixture.

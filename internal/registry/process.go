@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"registry.actionlint.kjanat.dev/internal/compatibility"
@@ -46,7 +48,8 @@ func CheckCompatibility(ctx context.Context, executable, path string, entry Entr
 
 // CheckArtifact observes a local candidate without requiring publication. The
 // caller supplies the inspected digest; the checker receives a verified snapshot.
-// An empty runnerAsOf lets the checker use the current UTC date.
+// A protocol 2 checker receives a non-empty runnerAsOf and otherwise uses the
+// current UTC date. A protocol 1 checker receives no date and reports none.
 func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runnerAsOf string) (evidence compatibility.Evidence, err error) {
 	executable, err = filepath.Abs(executable)
 	if err != nil {
@@ -55,12 +58,8 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runner
 	if !digestPattern.MatchString(expectedDigest) {
 		return evidence, errors.New("invalid checker input digest")
 	}
-	var args []string
-	if runnerAsOf != "" {
-		if date, err := time.Parse(time.DateOnly, runnerAsOf); err != nil || date.Format(time.DateOnly) != runnerAsOf {
-			return evidence, errors.New("invalid runner assessment date")
-		}
-		args = append(args, "--runner-as-of", runnerAsOf)
+	if runnerAsOf != "" && !compatibility.ValidDate(runnerAsOf) {
+		return evidence, errors.New("invalid runner assessment date")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
@@ -85,31 +84,71 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runner
 	if digest != expectedDigest {
 		return evidence, errors.New("checker input checksum differs from inspected artifact")
 	}
-	cmd := exec.CommandContext(ctx, checkerPath, append(args, snapshot)...)
+	protocol, err := checkerProtocol(ctx, checkerPath, dir)
+	if err != nil {
+		return evidence, err
+	}
+	var args []string
+	if protocol >= 2 && runnerAsOf != "" {
+		args = append(args, "--runner-as-of", runnerAsOf)
+	}
+	stdout := &boundedBuffer{limit: 1 << 20}
+	if err = checkerCommand(ctx, checkerPath, dir, stdout, append(args, snapshot)...).Run(); err != nil {
+		return evidence, fmt.Errorf("checker process: %w", err)
+	}
+	if err = jsonv2.Unmarshal(stdout.Bytes(), &evidence.Report, jsonv2.RejectUnknownMembers(true)); err != nil {
+		return evidence, fmt.Errorf("checker response: %w", err)
+	}
+	evidence.ObservedAt = time.Now().UTC()
+	if evidence.Report.ArtifactSHA256 != expectedDigest {
+		return evidence, errors.New("checker report refers to a different artifact")
+	}
+	if evidence.Report.SchemaVersion != protocol {
+		return evidence, fmt.Errorf("checker answered protocol %d but reported schema_version %d", protocol, evidence.Report.SchemaVersion)
+	}
+	if protocol >= 2 {
+		expected := runnerAsOf
+		if expected == "" {
+			expected = evidence.ObservedAt.Format(time.DateOnly)
+		}
+		if evidence.Report.RunnerAsOf != expected {
+			return evidence, fmt.Errorf("checker used runner assessment date %q instead of %q", evidence.Report.RunnerAsOf, expected)
+		}
+	}
+	return evidence, evidence.Validate()
+}
+
+// checkerProtocol asks the checker for its protocol version. A protocol 1
+// checker treats the probe as a missing artifact: it exits non-zero and prints
+// nothing to stdout.
+func checkerProtocol(ctx context.Context, checkerPath, dir string) (int, error) {
+	stdout := &boundedBuffer{limit: 64}
+	err := checkerCommand(ctx, checkerPath, dir, stdout, compatibility.ProtocolProbe).Run()
+	answer := strings.TrimSpace(string(stdout.Bytes()))
+	var exit *exec.ExitError
+	switch {
+	case err == nil && answer == strconv.Itoa(compatibility.ProtocolVersion):
+		return compatibility.ProtocolVersion, nil
+	case errors.As(err, &exit) && answer == "":
+		return 1, nil
+	case err != nil:
+		return 0, fmt.Errorf("checker protocol probe: %w", err)
+	default:
+		return 0, fmt.Errorf("unsupported checker protocol %q", answer)
+	}
+}
+
+func checkerCommand(ctx context.Context, checkerPath, dir string, stdout io.Writer, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, checkerPath, args...)
 	cmd.Dir = dir
 	cmd.Env = []string{"GOMEMLIMIT=512MiB", "TMPDIR=" + dir, "TMP=" + dir, "TEMP=" + dir}
 	if root, ok := os.LookupEnv("SystemRoot"); ok {
 		cmd.Env = append(cmd.Env, "SystemRoot="+root)
 	}
 	cmd.WaitDelay = time.Second
-	stdout := &boundedBuffer{limit: 1 << 20}
-	stderr := &boundedBuffer{limit: 64 << 10}
 	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err = cmd.Run(); err != nil {
-		return evidence, fmt.Errorf("checker process: %w", err)
-	}
-	if err = jsonv2.Unmarshal(stdout.Bytes(), &evidence.Report, jsonv2.RejectUnknownMembers(true)); err != nil {
-		return evidence, fmt.Errorf("checker response: %w", err)
-	}
-	if evidence.Report.ArtifactSHA256 != expectedDigest {
-		return evidence, errors.New("checker report refers to a different artifact")
-	}
-	if runnerAsOf != "" && evidence.Report.RunnerAsOf != runnerAsOf {
-		return evidence, fmt.Errorf("checker used runner assessment date %q instead of %q", evidence.Report.RunnerAsOf, runnerAsOf)
-	}
-	evidence.ObservedAt = time.Now().UTC()
-	return evidence, evidence.Validate()
+	cmd.Stderr = &boundedBuffer{limit: 64 << 10}
+	return cmd
 }
 
 // snapshotFile hashes the bytes it copies, so execution cannot race a replacement

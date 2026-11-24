@@ -8,7 +8,13 @@ import (
 	"time"
 )
 
-const ProtocolVersion = 1
+// ProtocolVersion 2 adds the --protocol probe, the --runner-as-of flag and the
+// required runner_as_of report field. Version 1 checkers accept neither flag.
+const ProtocolVersion = 2
+
+// ProtocolProbe is the argument a version 2 checker answers with its protocol
+// version instead of checking an artifact.
+const ProtocolProbe = "--protocol"
 
 var digest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
@@ -31,13 +37,14 @@ type Report struct {
 }
 
 func (r Report) Validate() error {
-	if r.SchemaVersion != ProtocolVersion || !digest.MatchString(r.ArtifactSHA256) || !bounded(r.Host.Name, 128) || !bounded(r.Host.Revision, 256) || !bounded(r.Policy, 256) || len(r.Detail) > 16384 || len(r.Checks) > 4096 {
+	if r.SchemaVersion < 1 || r.SchemaVersion > ProtocolVersion || !digest.MatchString(r.ArtifactSHA256) || !bounded(r.Host.Name, 128) || !bounded(r.Host.Revision, 256) || !bounded(r.Policy, 256) || len(r.Detail) > 16384 || len(r.Checks) > 4096 {
 		return errors.New("invalid compatibility report identity or bounds")
 	}
-	if r.RunnerAsOf != "" {
-		if date, err := time.Parse(time.DateOnly, r.RunnerAsOf); err != nil || date.Format(time.DateOnly) != r.RunnerAsOf {
-			return errors.New("invalid runner assessment date")
-		}
+	switch {
+	case r.SchemaVersion == 1 && r.RunnerAsOf != "":
+		return errors.New("protocol 1 reports carry no runner assessment date")
+	case r.SchemaVersion >= 2 && !ValidDate(r.RunnerAsOf):
+		return errors.New("invalid runner assessment date")
 	}
 	switch r.Outcome {
 	case "passed":
@@ -58,6 +65,12 @@ func (r Report) Validate() error {
 	}
 	return nil
 }
+
+func ValidDate(value string) bool {
+	date, err := time.Parse(time.DateOnly, value)
+	return err == nil && date.Format(time.DateOnly) == value
+}
+
 func bounded(value string, limit int) bool {
 	return len(value) > 0 && len(value) <= limit && !strings.ContainsAny(value, "\x00\r\n")
 }

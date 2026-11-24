@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"registry.actionlint.kjanat.dev/internal/compatibility"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -28,7 +30,11 @@ func TestCapturedOutputCannotBypassLimit(t *testing.T) {
 
 // The test executable acts as a checker when launched on the parent's snapshot.
 func TestMain(m *testing.M) {
-	runnerAsOf, args := checkerTodayFixture, os.Args[1:]
+	runnerAsOf, args := time.Now().UTC().Format(time.DateOnly), os.Args[1:]
+	if len(args) == 1 && args[0] == compatibility.ProtocolProbe {
+		fmt.Println(compatibility.ProtocolVersion)
+		os.Exit(0)
+	}
 	if len(args) == 3 && args[0] == "--runner-as-of" {
 		runnerAsOf, args = args[1], args[2:]
 	}
@@ -39,10 +45,10 @@ func TestMain(m *testing.M) {
 		}
 		outcome := string(data)
 		if outcome == "ignores-date" {
-			outcome, runnerAsOf = "passed", checkerTodayFixture
+			outcome, runnerAsOf = "passed", foreignDateFixture
 		}
 		sum := sha256.Sum256(data)
-		reply := compatibility.Report{SchemaVersion: 1, ArtifactSHA256: hex.EncodeToString(sum[:]), Host: compatibility.Host{Name: "fixture", Revision: "host-a"}, Policy: "test/1", Outcome: outcome, Checks: []string{"sample"}, RunnerAsOf: runnerAsOf}
+		reply := compatibility.Report{SchemaVersion: compatibility.ProtocolVersion, ArtifactSHA256: hex.EncodeToString(sum[:]), Host: compatibility.Host{Name: "fixture", Revision: "host-a"}, Policy: "test/1", Outcome: outcome, Checks: []string{"sample"}, RunnerAsOf: runnerAsOf}
 		if reply.Outcome != "passed" {
 			reply.Detail = "unsupported or failed fixture"
 		}
@@ -104,7 +110,9 @@ func TestCheckerFailuresNeverMutateAdmission(t *testing.T) {
 	}
 }
 
-const checkerTodayFixture = "2026-11-24"
+const foreignDateFixture = "2001-01-01"
+
+func today() string { return time.Now().UTC().Format(time.DateOnly) }
 
 func recheckFixture(t *testing.T, content string, stored ...compatibility.Evidence) (EvidenceStore, Index, Entry, string, string) {
 	t.Helper()
@@ -139,7 +147,7 @@ func recheckFixture(t *testing.T, content string, stored ...compatibility.Eviden
 
 func datedObservation(entry Entry, runnerAsOf string, observedAt time.Time) compatibility.Evidence {
 	evidence := observation(entry, "passed")
-	evidence.Report.RunnerAsOf, evidence.ObservedAt = runnerAsOf, observedAt
+	evidence.Report.SchemaVersion, evidence.Report.RunnerAsOf, evidence.ObservedAt = 2, runnerAsOf, observedAt
 	return evidence
 }
 
@@ -152,33 +160,35 @@ func TestRecheckRecordsTodayWithoutStoredDate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if evidence.Report.RunnerAsOf != checkerTodayFixture {
+			if evidence.Report.RunnerAsOf != today() {
 				t.Fatalf("recheck did not use the checker's current date: %+v", evidence.Report)
 			}
 			recorded, err := store.Load(index)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.ContainsFunc(recorded, func(e compatibility.Evidence) bool { return e.Report.RunnerAsOf == checkerTodayFixture }) {
+			if !slices.ContainsFunc(recorded, func(e compatibility.Evidence) bool { return e.Report.RunnerAsOf == today() }) {
 				t.Fatalf("recheck did not record its date: %+v", recorded)
 			}
 		})
 	}
 }
 
-func TestRecheckReplaysEarliestStoredDate(t *testing.T) {
+// The earliest observation carries the later date, so choosing the smallest
+// date instead of the earliest observation fails.
+func TestRecheckReplaysDateOfEarliestObservation(t *testing.T) {
 	entry := acceptedFixture(t)
 	first := time.Now().UTC().Add(-72 * time.Hour)
 	store, index, entry, executable, path := recheckFixture(t, "passed",
-		datedObservation(entry, "2026-12-10", first.Add(48*time.Hour)),
-		datedObservation(entry, "2026-12-08", first),
+		datedObservation(entry, "2026-12-08", first.Add(48*time.Hour)),
+		datedObservation(entry, "2026-12-10", first),
 		observation(entry, "passed"))
 	evidence, err := store.Recheck(t.Context(), index, executable, path, entry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evidence.Report.RunnerAsOf != "2026-12-08" {
-		t.Fatalf("recheck did not replay the stored date: %+v", evidence.Report)
+	if evidence.Report.RunnerAsOf != "2026-12-10" {
+		t.Fatalf("recheck did not replay the earliest observation's date: %+v", evidence.Report)
 	}
 }
 
@@ -195,5 +205,64 @@ func TestRecheckRejectsCheckerIgnoringStoredDate(t *testing.T) {
 	after, err := store.Load(index)
 	if err != nil || len(after) != len(before) {
 		t.Fatalf("rejected recheck stored evidence: %d -> %d, %v", len(before), len(after), err)
+	}
+}
+
+func TestCheckRejectsDateOtherThanObservationDay(t *testing.T) {
+	_, _, entry, executable, path := recheckFixture(t, "ignores-date")
+	if _, err := CheckCompatibility(t.Context(), executable, path, entry, ""); err == nil || !strings.Contains(err.Error(), "instead of \""+today()+"\"") {
+		t.Fatalf("report dated %s was accepted without a requested date: %v", foreignDateFixture, err)
+	}
+}
+
+// shellChecker writes a POSIX shell checker that logs its arguments. A protocol
+// 1 checker accepts exactly one existing artifact path, like the original
+// checker; protocol 2 and later answer the probe.
+func shellChecker(t *testing.T, protocol int, report string) (string, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake checker is a POSIX shell script")
+	}
+	directory := t.TempDir()
+	argsLog := filepath.Join(directory, "args.log")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\n"
+	if protocol > 1 {
+		script += fmt.Sprintf("if [ \"$1\" = %s ]; then printf '%%s\\n' %d; exit 0; fi\n", compatibility.ProtocolProbe, protocol)
+	}
+	script += "[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '%s\\n' '" + report + "'\n"
+	path := filepath.Join(directory, "checker")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path, argsLog
+}
+
+func TestRecheckGivesProtocol1CheckerNoDate(t *testing.T) {
+	entry := acceptedFixture(t)
+	store, index, entry, _, path := recheckFixture(t, "passed", datedObservation(entry, "2026-12-08", time.Now().UTC()))
+	report := fmt.Sprintf(`{"schema_version":1,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v1"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"]}`, entry.Submission.SHA256)
+	checker, argsLog := shellChecker(t, 1, report)
+	evidence, err := store.Recheck(t.Context(), index, checker, path, entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Report.SchemaVersion != 1 || evidence.Report.RunnerAsOf != "" {
+		t.Fatalf("protocol 1 record is not undated: %+v", evidence.Report)
+	}
+	data, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(calls) != 2 || calls[0] != compatibility.ProtocolProbe || strings.Contains(calls[1], "--runner-as-of") {
+		t.Fatalf("protocol 1 checker received %q", calls)
+	}
+}
+
+func TestCheckRejectsUnknownCheckerProtocol(t *testing.T) {
+	_, _, entry, _, path := recheckFixture(t, "passed")
+	checker, _ := shellChecker(t, 3, "{}")
+	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "unsupported checker protocol") {
+		t.Fatalf("protocol 3 checker was called: %v", err)
 	}
 }
