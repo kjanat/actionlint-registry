@@ -6,6 +6,7 @@ const timestamp = z.string().datetime({ offset: true });
 const ociReferencePattern =
 	/^oci:\/\/[a-z0-9]+(?:[.-][a-z0-9]+)*(?::([0-9]{1,5}))?(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+@sha256:[a-f0-9]{64}$/u;
 const provider = z.enum(['github', 'gitlab']);
+const interfaceNames = z.array(z.string().min(1).max(512)).max(4096);
 const metadata = z.object({
 	name: z.string().optional(),
 	description: z.string().optional(),
@@ -38,10 +39,16 @@ export const manifestSchema = z.object({
 		plugin_id: z.string(),
 		repository_id: z.string(),
 	}),
-	versions: z.array(z.object({
-		version: z.string(),
-		record: z.string().regex(/^versions\/[a-f0-9]{64}\.json$/),
-	})).min(1),
+	versions: z.array(
+		z.object({
+			version: z.string(),
+			record: z.string().regex(/^versions\/[a-f0-9]{64}\.json$/),
+			imports: interfaceNames.optional(),
+			exports: interfaceNames.optional(),
+		}).refine(version => (version.imports === undefined) === (version.exports === undefined), {
+			message: 'A version lists both imports and exports or neither',
+		}),
+	).min(1),
 });
 
 export const entrySchema = z.object({
@@ -152,6 +159,7 @@ export interface Release {
 	reason: string;
 	replacement: string;
 	downloads: Metric;
+	interfaces: { imports: string[]; exports: string[] } | null;
 }
 
 export interface Plugin extends PluginSummary {

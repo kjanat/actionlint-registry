@@ -119,6 +119,9 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 				reason: status?.reason ?? '',
 				replacement: status?.replacement ?? '',
 				downloads: releaseMetric(entry, downloads),
+				interfaces: version.imports && version.exports
+					? { imports: version.imports, exports: version.exports }
+					: null,
 			};
 			return { entry, release };
 		}));
