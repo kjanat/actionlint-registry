@@ -18,7 +18,7 @@ import (
 	"actionlint.kjanat.dev/v2/registry/validation/internal/validation"
 )
 
-const protocolVersion = 2
+const protocolVersion = 3
 
 type host struct {
 	Name     string `json:"name"`
@@ -33,6 +33,8 @@ type report struct {
 	Checks         []string `json:"checks"`
 	RunnerAsOf     string   `json:"runner_as_of"`
 	Detail         string   `json:"detail,omitempty"`
+	Imports        []string `json:"imports,omitzero"`
+	Exports        []string `json:"exports,omitzero"`
 }
 
 func main() {
@@ -82,7 +84,14 @@ func run(ctx context.Context, args []string) error {
 		return errors.New("artifact exceeds 64 MiB")
 	}
 	reply := report{SchemaVersion: protocolVersion, ArtifactSHA256: hex.EncodeToString(hash.Sum(nil)), Host: host{Name: "actionlint", Revision: validation.HostCommit}, Policy: "actionlint-smoke/1", Outcome: "passed", Checks: []string{}, RunnerAsOf: asOf.String()}
-	result, err := validation.Validate(ctx, asOf, path)
+	opened, err := validation.Open(ctx, path)
+	var result validation.Result
+	if err == nil {
+		if opened.Interfaces != nil {
+			reply.Imports, reply.Exports = opened.Interfaces.Imports, opened.Interfaces.Exports
+		}
+		result, err = opened.Validate(ctx, asOf)
+	}
 	if err != nil {
 		reply.Outcome = "failed"
 		if errors.Is(err, validation.ErrUnsupportedContract) {

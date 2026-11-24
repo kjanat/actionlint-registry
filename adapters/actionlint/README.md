@@ -13,27 +13,31 @@ go -C adapters/actionlint build -o ../../actionlint-checker .
 ```
 
 The executable accepts one local artifact path and writes one JSON compatibility
-report to stdout. It implements report protocol 2: `--protocol` prints `2`, and the
+report to stdout. It implements report protocol 3: `--protocol` prints `3`, and the
 report's `runner_as_of` is the runner assessment date. The date is
 the current UTC date unless `--runner-as-of YYYY-MM-DD` sets it; the registry
-always sets it. Run the checker through the registry's `check` command to verify
+always sets it. For a component, the report's `imports` and `exports` are the
+lists the host's `component.ReadInterfaces` reads from the bytes, whatever the
+outcome. Run the checker through the registry's `check` command to verify
 the accepted artifact's checksum, isolate inherited credentials, and store the
 report.
 The process boundary does not provide an operating-system sandbox.
 
 The checker uses the actionlint v2 revision required in `go.mod` and reports it
 from the build. Its tests load runtime fixtures from that host module.
-It supports core ABI 1, the analyzer WIT role at 0.2.0, and runner-provider and
-script-engine at 0.2.0 and 0.3.0. The host module supplies these interface names.
-A template-effects extension must match its script-engine version.
+It supports core ABI 1. Components pass the host's own admission decision,
+`component.Admit`, so the checker accepts the components that host revision
+loads, with the roles that decision returns. The metadata `interface` must name one
+of the component's exports. A component whose declared interface is missing from
+its exports, or one the host rejects, returns `failed`. A declared interface the
+host does not load returns `unsupported`.
 The host validates exported component types. A WIT source checksum also covers
 documentation comments, so a different checksum alone does not reject an analyzer.
-Script engines validate default options and repeated diagnostic calls. Runner
-providers resolve a workflow's runner selector with missing evidence for each
-declared target, through the host's runner resolution;
+Each admitted role runs its own checks. Analyzers check a sample workflow twice
+and an empty workflow. Script engines validate default options and repeated
+diagnostic calls. Runner providers resolve a workflow's runner selector with
+missing evidence for each declared target, through the host's runner resolution;
 vendor-specific snapshot behavior belongs in the publisher's candidate fixtures.
-Unknown contracts return `unsupported`; understood contracts that fail validation
-return `failed`. Admission and the shared candidate check reject `failed`.
-
-A host update that changes a WIT contract needs matching contract constants. The
-module's tests and linter fail until they match.
+Reference resolvers resolve a full commit ID twice against an in-memory repository.
+The embedded `descriptor` must match the runtime descriptor of the role that
+`interface` names. Admission and the shared candidate check reject `failed`.
