@@ -200,9 +200,9 @@ version entry in its plugin `index.json`:
 }
 ```
 
-The entry omits both lists when no report for the release lists them, or when
-the reports disagree, as OCI platform layers with different exports do. actionlint
-then checks the downloaded bytes. Running `check --plugin --version` with a
+The entry omits both lists when a checked file, such as one OCI platform layer, has
+no report that lists them, or when the reports disagree, as OCI platform layers
+with different exports do. actionlint then checks the downloaded bytes. Running `check --plugin --version` with a
 protocol 3 checker over a published version adds the lists to its entry.
 
 For release preparation, the [shared candidate check](publishing.md) also installs

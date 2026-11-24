@@ -55,6 +55,15 @@ type VersionLink struct {
 }
 
 func interfaceFacts(observations []compatibility.Evidence) (imports, exports []string) {
+	listed := map[string]bool{}
+	for _, item := range observations {
+		listed[item.Report.ArtifactSHA256] = listed[item.Report.ArtifactSHA256] || item.Report.HasInterfaces()
+	}
+	for _, found := range listed {
+		if !found {
+			return nil, nil
+		}
+	}
 	for _, item := range observations {
 		if !item.Report.HasInterfaces() {
 			continue

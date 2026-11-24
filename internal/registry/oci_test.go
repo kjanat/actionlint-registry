@@ -695,3 +695,23 @@ func TestOCIPlatformsMustShareMetadata(t *testing.T) {
 		t.Fatalf("platforms with different metadata were accepted: %v", err)
 	}
 }
+
+func TestOCIPlatformWithoutListsPublishesNone(t *testing.T) {
+	service, receipt, _ := ociComponentRelease(t, componentLayer("linux"), componentLayer("darwin"))
+	index := EmptyIndex()
+	admission, err := service.Admit(t.Context(), &index, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlisted := admission.Evidence[1]
+	unlisted.Report.Outcome, unlisted.Report.Detail = "failed", "validate component contract: newer parser rejects this platform"
+	unlisted.Report.Imports, unlisted.Report.Exports = nil, nil
+	unlisted.Report.ArtifactSHA256 = strings.Repeat("f", 64)
+	version := exportedVersion(t, index, []compatibility.Evidence{admission.Evidence[0], unlisted})
+	if _, found := version["imports"]; found {
+		t.Fatalf("published imports although one platform has no lists: %s", version["imports"])
+	}
+	if _, found := version["exports"]; found {
+		t.Fatalf("published exports although one platform has no lists: %s", version["exports"])
+	}
+}
