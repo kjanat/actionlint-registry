@@ -94,12 +94,15 @@ for (const redirectAt of [0, 1, 2]) {
 							return new Response(null, { status: 302, headers: { location: 'https://other.example/' } });
 						}
 						if (requests.length === 1) {
-							return Response.json({
-								token: installationToken,
-								expires_at: new Date(Date.now() + 3600000).toISOString(),
-								permissions: { actions: 'write', metadata: 'read' },
-								repositories: [{ id: 1424600475, full_name: 'kjanat/actionlint-registry' }],
-							}, { status: 201 });
+							return Response.json(
+								{
+									token: installationToken,
+									expires_at: new Date(Date.now() + 3600000).toISOString(),
+									permissions: { actions: 'write', metadata: 'read' },
+									repositories: [{ id: 1424600475, full_name: 'kjanat/actionlint-registry' }],
+								},
+								{ status: 201 },
+							);
 						}
 						return Response.json({ workflow_run_id: 123 });
 					},

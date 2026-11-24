@@ -1,29 +1,32 @@
-[tools]
-node                          = "26.13.1"
-bun                           = "latest"
-golangci-lint                 = "2.15.0"
-"github:kjanat/kprint"        = "latest"
-"github:kjanat/runner"        = "latest"
-"github:kjanat/shellcheck-rs" = { version = "latest", rename_exe = "shellcheck" }
-oras                          = "1.4.0"
+#:tombi toml-version = "v1.1.0"
 
-[tools."npm:https://pkg.pr.new/kjanat/actionlint/@kjanat/actionlint@master"]
-version           = "latest"
-auto_update       = true
-depends           = ["github:kjanat/shellcheck-rs"]
-allow_exotic_deps = [
-  "@kjanat-actionlint/actionlint-darwin-arm64",
-  "@kjanat-actionlint/actionlint-darwin-x64",
-  "@kjanat-actionlint/actionlint-linux-arm64",
-  "@kjanat-actionlint/actionlint-linux-x64",
-  "@kjanat-actionlint/actionlint-win32-arm64",
-  "@kjanat-actionlint/actionlint-win32-x64",
-]
+[tools]
+node          = "26.13.1"
+bun           = "1.4.5"
+golangci-lint = "2.15.0"
+kprint        = "0.64.1"
+runner-run    = "0.28.0"
+rshellcheck   = { version = "1.2.0", rename_exe = "shellcheck" }
+oras          = "1.4.0"
+actionlint    = {
+  version           = "latest",
+  allow_exotic_deps = true,
+  auto_update       = true,
+  depends           = ["rshellcheck"],
+}
+
+[tool_alias]
+actionlint  = "npm:https://pkg.pr.new/kjanat/actionlint/@kjanat/actionlint@master"
+kprint      = "github:kjanat/kprint"
+runner-run  = "github:kjanat/runner"
+rshellcheck = "cargo:rshellcheck"
 
 [settings]
 idiomatic_version_file_enable_tools = ["node", "bun", "go"]
 
 [wrappers]
+kfmt = { command = "kprint", args = ["fmt"] }
+
 [wrappers.wrangler]
 command = "run"
 args    = ["wrangler"]
@@ -36,7 +39,8 @@ env     = { RUNNER_DIR = "worker" }
 
 [tasks.setup]
 description = "Install project dependencies."
-run         = ["bun install --frozen-lockfile", "bun run --cwd site browser:install"]
+run         = ["runner i -f @kjanat-actionlint/registry-site:browser:install"]
+confirm     = { message = "Will install Playwright on your system", default = "yes" }
 
 [tasks.check]
 description = "Run project checks."

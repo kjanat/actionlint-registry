@@ -42,7 +42,7 @@ The local implementation command is:
 ```sh
 go run ./cmd/registry status \
   --plugin github.com/owner/plugin --version v1.0.0 \
-  --sha256 <accepted-sha256> --status withdrawn \
+  --sha256 '<accepted-sha256>' --status withdrawn \
   --reason 'Incorrect analysis for supported scripts; see issue #123' \
   --replacement github.com/owner/plugin@v1.0.1 \
   --actor-file /path/to/trusted-workflow-actor.json

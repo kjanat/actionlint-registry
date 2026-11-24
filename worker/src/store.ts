@@ -257,16 +257,16 @@ export class InboxStore {
 	private checkPendingQuota(publisher: string): void {
 		if (
 			count(
-					this.db.query(
-						"SELECT count(*) AS n FROM submissions WHERE publisher = ? AND status IN ('pending', 'validating')",
-						publisher,
-					)[0],
-				) >= 10
+				this.db.query(
+					"SELECT count(*) AS n FROM submissions WHERE publisher = ? AND status IN ('pending', 'validating')",
+					publisher,
+				)[0],
+			) >= 10
 			|| count(
-					this.db.query(
-						"SELECT count(*) AS n FROM submissions WHERE status IN ('pending', 'validating')",
-					)[0],
-				) >= 1000
+				this.db.query(
+					"SELECT count(*) AS n FROM submissions WHERE status IN ('pending', 'validating')",
+				)[0],
+			) >= 1000
 		) {
 			throw new HttpError(429, 'The inbox pending quota has been exceeded.');
 		}
