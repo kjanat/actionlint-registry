@@ -129,13 +129,13 @@ func run(ctx context.Context, args []string) error {
 		}
 		return (registry.StatusStore{Directory: *statusPath}).Add(index, status)
 	case "check":
-		if strings.HasPrefix(*artifactPath, "oci://") {
-			return errors.New("OCI graph compatibility checks are unsupported by the local-file checker protocol")
-		}
 		if *checker == "" || *artifactPath == "" || (*pluginID == "") != (*version == "") {
 			return errors.New("check requires --checker and --artifact; add both --plugin and --version to record evidence for an accepted release")
 		}
 		if *pluginID == "" {
+			if strings.HasPrefix(*artifactPath, "oci://") {
+				return errors.New("an OCI check requires the --plugin and --version of an accepted release")
+			}
 			declaration, err := artifact.Inspect(ctx, *artifactPath)
 			if err != nil {
 				return err
@@ -153,11 +153,17 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		evidence, err := (registry.EvidenceStore{Directory: *evidencePath}).Recheck(ctx, index, *checker, *artifactPath, entry)
+		observed, err := (registry.EvidenceStore{Directory: *evidencePath}).Recheck(ctx, index, *checker, *artifactPath, entry, registry.NewOCIInspector().Walk)
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(os.Stdout).Encode(evidence)
+		encoder := json.NewEncoder(os.Stdout)
+		for _, evidence := range observed {
+			if err = encoder.Encode(evidence); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "resolve":
 		statuses, err := (registry.StatusStore{Directory: *statusPath}).Load(index)
 		if err != nil {
@@ -273,8 +279,10 @@ func run(ctx context.Context, args []string) error {
 				destination.Directory = *candidatePath
 			}
 			admissionErr = destination.Merge(delta)
-			if admissionErr == nil && admission.Evidence != nil {
-				admissionErr = (registry.EvidenceStore{Directory: *evidencePath}).Add(delta, *admission.Evidence)
+			for _, evidence := range admission.Evidence {
+				if admissionErr == nil {
+					admissionErr = (registry.EvidenceStore{Directory: *evidencePath}).Add(delta, evidence)
+				}
 			}
 		}
 		if admissionErr == nil {

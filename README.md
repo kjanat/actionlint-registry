@@ -293,6 +293,7 @@ go run ./cmd/registry check --checker ./actionlint-checker \
   --artifact plugin.wasm --plugin github.com/owner/plugin --version v1.0.0
 ```
 
+For an accepted OCI release, pass its pinned `oci://` reference as `--artifact`.
 Omit `--plugin` and `--version` to check unpublished bytes without creating a tag
 or accepted version. The report is an observation of that artifact and host; it
 does not authorize publication. The full candidate check additionally exercises

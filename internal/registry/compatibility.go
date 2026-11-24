@@ -27,47 +27,59 @@ func evidenceName(e compatibility.Evidence) (string, error) {
 }
 
 // Recheck runs the checker on an accepted release with the runner assessment date
-// of the release's earliest dated evidence, then stores the new observation.
-func (store EvidenceStore) Recheck(ctx context.Context, index Index, executable, path string, entry Entry) (compatibility.Evidence, error) {
+// of the release's earliest dated evidence, then stores the new observations.
+func (store EvidenceStore) Recheck(ctx context.Context, index Index, executable, path string, entry Entry, walk OCIWalker) ([]compatibility.Evidence, error) {
 	stored, err := store.Load(index)
 	if err != nil {
-		return compatibility.Evidence{}, err
+		return nil, err
 	}
 	runnerAsOf := ""
 	var earliest time.Time
 	for _, evidence := range stored {
-		if evidence.Report.ArtifactSHA256 != entry.Submission.Digest() || evidence.Report.RunnerAsOf == "" {
+		if evidence.Release() != entry.Submission.Digest() || evidence.Report.RunnerAsOf == "" {
 			continue
 		}
 		if runnerAsOf == "" || evidence.ObservedAt.Before(earliest) {
 			runnerAsOf, earliest = evidence.Report.RunnerAsOf, evidence.ObservedAt
 		}
 	}
-	evidence, err := CheckCompatibility(ctx, executable, path, entry, runnerAsOf)
+	observed, err := CheckCompatibility(ctx, executable, path, entry, runnerAsOf, walk)
 	if err != nil {
-		return evidence, err
+		return nil, err
 	}
-	return evidence, store.Add(index, evidence)
+	for _, evidence := range observed {
+		if err = store.Add(index, evidence); err != nil {
+			return nil, err
+		}
+	}
+	return observed, nil
+}
+
+func acceptedRelease(index Index, evidence compatibility.Evidence) error {
+	for _, entry := range index.Entries {
+		if entry.Submission.Digest() != evidence.Release() {
+			continue
+		}
+		if entry.Submission.IsOCI() != (evidence.ReleaseSHA256 != "") {
+			return errors.New("OCI evidence must name its release and checked layer; other evidence names only its artifact")
+		}
+		return nil
+	}
+	return errors.New("compatibility evidence has no accepted artifact")
 }
 
 func (store EvidenceStore) Add(index Index, evidence compatibility.Evidence) error {
 	if err := evidence.Validate(); err != nil {
 		return err
 	}
-	found := false
-	for _, entry := range index.Entries {
-		if entry.Submission.Digest() == evidence.Report.ArtifactSHA256 {
-			found = true
-		}
-	}
-	if !found {
-		return errors.New("compatibility evidence has no accepted artifact")
+	if err := acceptedRelease(index, evidence); err != nil {
+		return err
 	}
 	name, err := evidenceName(evidence)
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(store.Directory, evidence.Report.ArtifactSHA256, name)
+	path := filepath.Join(store.Directory, evidence.Release(), name)
 	if err = safePath(path); err != nil {
 		return err
 	}
@@ -131,11 +143,14 @@ func (store EvidenceStore) Load(index Index) ([]compatibility.Evidence, error) {
 			if err = evidence.Validate(); err != nil {
 				return nil, err
 			}
+			if err = acceptedRelease(index, evidence); err != nil {
+				return nil, err
+			}
 			name, err := evidenceName(evidence)
 			if err != nil {
 				return nil, err
 			}
-			if name != file.Name() || evidence.Report.ArtifactSHA256 != dir.Name() {
+			if name != file.Name() || evidence.Release() != dir.Name() {
 				return nil, fmt.Errorf("compatibility record identity mismatch: %s", file.Name())
 			}
 			result = append(result, evidence)
@@ -145,19 +160,17 @@ func (store EvidenceStore) Load(index Index) ([]compatibility.Evidence, error) {
 }
 
 // MergeCandidate merges admitted records and their compatibility evidence. A
-// version the store does not hold yet needs evidence for its digest, except an
-// OCI version: a checker report names the single file it hashed, while an OCI
-// release is named by its root manifest digest over one or more platform layers.
+// version the store does not hold yet needs evidence for its digest.
 func MergeCandidate(store Store, candidate Index, candidateEvidence []compatibility.Evidence, evidence EvidenceStore) error {
 	current, err := store.Load()
 	if err != nil {
 		return err
 	}
 	for _, entry := range candidate.Entries {
-		if entry.Submission.IsOCI() || slices.ContainsFunc(current.Entries, func(old Entry) bool { return old.Submission == entry.Submission }) {
+		if slices.ContainsFunc(current.Entries, func(old Entry) bool { return old.Submission == entry.Submission }) {
 			continue
 		}
-		if !slices.ContainsFunc(candidateEvidence, func(e compatibility.Evidence) bool { return e.Report.ArtifactSHA256 == entry.Submission.Digest() }) {
+		if !slices.ContainsFunc(candidateEvidence, func(e compatibility.Evidence) bool { return e.Release() == entry.Submission.Digest() }) {
 			return reject(entry.Name() + "@" + entry.Submission.Tag + " has no compatibility evidence")
 		}
 	}

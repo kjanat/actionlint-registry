@@ -63,14 +63,14 @@ func WriteReport(path string, report Report) error {
 type Service struct {
 	Providers  map[string]ReleaseProvider
 	Inspect    Inspector
-	InspectOCI func(context.Context, string) (artifact.Declaration, error)
+	InspectOCI OCIWalker
 	Checker    string
 }
 
 // Admission is an accepted entry and, when a checker ran, the evidence it produced.
 type Admission struct {
 	Entry    Entry
-	Evidence *compatibility.Evidence
+	Evidence []compatibility.Evidence
 }
 
 func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt) (Admission, error) {
@@ -109,14 +109,30 @@ func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt)
 			return Admission{Entry: old}, nil
 		}
 	}
-	var evidence *compatibility.Evidence
+	var evidence []compatibility.Evidence
+	record := func(observed []compatibility.Evidence) error {
+		for _, item := range observed {
+			if item.Report.Outcome == "failed" {
+				return reject("compatibility check failed: " + item.Report.Detail)
+			}
+		}
+		evidence = observed
+		return nil
+	}
 	declaration, err := func() (result artifact.Declaration, err error) {
 		if s.IsOCI() {
-			inspect := service.InspectOCI
-			if inspect == nil {
-				inspect = NewOCIInspector().Inspect
+			walk := service.InspectOCI
+			if walk == nil {
+				walk = NewOCIInspector().Walk
 			}
-			return inspect(ctx, s.Artifact.Reference())
+			if service.Checker == "" {
+				return walk(ctx, s.Artifact.Reference(), nil)
+			}
+			result, observed, err := CheckOCI(ctx, service.Checker, walk, s.Artifact.Reference(), "")
+			if err == nil {
+				err = record(observed)
+			}
+			return result, err
 		}
 		dir, err := os.MkdirTemp("", "actionlint-registry-")
 		if err != nil {
@@ -138,11 +154,8 @@ func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt)
 		if err == nil && service.Checker != "" {
 			var observed compatibility.Evidence
 			observed, err = CheckArtifact(ctx, service.Checker, path, s.Digest(), "")
-			if err == nil && observed.Report.Outcome == "failed" {
-				err = reject("compatibility check failed: " + observed.Report.Detail)
-			}
 			if err == nil {
-				evidence = &observed
+				err = record([]compatibility.Evidence{observed})
 			}
 		}
 		return result, err

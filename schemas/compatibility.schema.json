@@ -192,6 +192,11 @@
       "type": "string",
       "format": "date-time"
     },
+    "release_sha256": {
+      "description": "OCI root digest of the release whose platform layer the report checked.",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "report": {
       "$ref": "#/$defs/report"
     }

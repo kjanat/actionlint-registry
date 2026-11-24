@@ -100,6 +100,7 @@ func bounded(value string, limit int) bool {
 // Host identities are checker claims, not publisher-controlled release metadata.
 type Evidence struct {
 	Report        Report    `json:"report"`
+	ReleaseSHA256 string    `json:"release_sha256,omitempty"`
 	CheckerSHA256 string    `json:"checker_sha256"`
 	ObservedAt    time.Time `json:"observed_at"`
 }
@@ -111,5 +112,15 @@ func (e Evidence) Validate() error {
 	if !digest.MatchString(e.CheckerSHA256) || e.ObservedAt.IsZero() || e.ObservedAt.After(time.Now().Add(time.Minute)) {
 		return errors.New("invalid compatibility observation")
 	}
+	if e.ReleaseSHA256 != "" && (!digest.MatchString(e.ReleaseSHA256) || e.ReleaseSHA256 == e.Report.ArtifactSHA256) {
+		return errors.New("invalid release digest for a checked layer")
+	}
 	return nil
+}
+
+func (e Evidence) Release() string {
+	if e.ReleaseSHA256 != "" {
+		return e.ReleaseSHA256
+	}
+	return e.Report.ArtifactSHA256
 }

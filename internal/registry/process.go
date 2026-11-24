@@ -13,10 +13,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"registry.actionlint.kjanat.dev/internal/artifact"
 	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
 
@@ -36,14 +38,67 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 // CheckCompatibility runs a trusted, explicitly selected checker on a checksum-verified
 // snapshot. It excludes registry credentials but does not provide an OS sandbox.
-func CheckCompatibility(ctx context.Context, executable, path string, entry Entry, runnerAsOf string) (evidence compatibility.Evidence, err error) {
-	if err = entry.Submission.Validate(); err != nil {
-		return evidence, err
+func CheckCompatibility(ctx context.Context, executable, path string, entry Entry, runnerAsOf string, walk OCIWalker) ([]compatibility.Evidence, error) {
+	if err := entry.Submission.Validate(); err != nil {
+		return nil, err
 	}
 	if entry.Submission.IsOCI() {
-		return evidence, errors.New("this checker accepts local package bytes; OCI graph checks are unsupported")
+		if path != entry.Submission.Artifact.Reference() {
+			return nil, errors.New("an OCI release check requires the release's pinned reference as its artifact")
+		}
+		_, evidence, err := CheckOCI(ctx, executable, walk, path, runnerAsOf)
+		return evidence, err
 	}
-	return CheckArtifact(ctx, executable, path, entry.Submission.Digest(), runnerAsOf)
+	evidence, err := CheckArtifact(ctx, executable, path, entry.Submission.Digest(), runnerAsOf)
+	if err != nil {
+		return nil, err
+	}
+	return []compatibility.Evidence{evidence}, nil
+}
+
+func CheckOCI(ctx context.Context, executable string, walk OCIWalker, reference, runnerAsOf string) (declaration artifact.Declaration, observed []compatibility.Evidence, err error) {
+	distribution, err := OCIReference(reference)
+	if err != nil {
+		return declaration, nil, err
+	}
+	dir, err := os.MkdirTemp("", "registry-oci-layers-")
+	if err != nil {
+		return declaration, nil, err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(dir)) }()
+	type layer struct{ digest, path string }
+	var layers []layer
+	declaration, err = walk(ctx, reference, func(digest, mediaType string, data []byte) error {
+		name := strings.TrimPrefix(digest, "sha256:")
+		if slices.ContainsFunc(layers, func(l layer) bool { return l.digest == name }) {
+			return nil
+		}
+		extension := ".wasm"
+		if mediaType == ociProcess {
+			extension = ".json"
+		}
+		path := filepath.Join(dir, name+extension)
+		layers = append(layers, layer{name, path})
+		return os.WriteFile(path, data, 0o600)
+	})
+	if err != nil {
+		return declaration, nil, err
+	}
+	if runnerAsOf == "" {
+		runnerAsOf = time.Now().UTC().Format(time.DateOnly)
+	}
+	for _, checked := range layers {
+		evidence, err := CheckArtifact(ctx, executable, checked.path, checked.digest, runnerAsOf)
+		if err != nil {
+			return declaration, nil, fmt.Errorf("OCI layer sha256:%s: %w", checked.digest, err)
+		}
+		evidence.ReleaseSHA256 = distribution.digest
+		if err = evidence.Validate(); err != nil {
+			return declaration, nil, err
+		}
+		observed = append(observed, evidence)
+	}
+	return declaration, observed, nil
 }
 
 // CheckArtifact observes a local candidate without requiring publication. The

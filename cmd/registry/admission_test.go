@@ -351,3 +351,15 @@ func TestAdmissionWorkflowCarriesEvidence(t *testing.T) {
 		t.Fatalf("admission workflow drops evidence: upload=%t download=%t merge=%t commit=%t", uploads, downloads, merges, commits)
 	}
 }
+
+func TestCheckOfUnpublishedOCIRequiresAcceptedRelease(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "plugins")
+	if err := os.Mkdir(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reference := "oci://registry.example/plugins/example@sha256:" + strings.Repeat("a", 64)
+	err := run(t.Context(), []string{"check", "--store", store, "--checker", "unused-checker", "--artifact", reference})
+	if err == nil || !strings.Contains(err.Error(), "--plugin and --version") {
+		t.Fatalf("unpublished OCI check: %v", err)
+	}
+}

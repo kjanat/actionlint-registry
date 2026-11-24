@@ -199,6 +199,24 @@ func TestCompatibilityReportStrictProtocol(t *testing.T) {
 	}
 }
 
+func TestEvidenceNamesTheReleaseOfACheckedLayer(t *testing.T) {
+	evidence := observation(acceptedFixture(t), "passed")
+	if evidence.Release() != evidence.Report.ArtifactSHA256 {
+		t.Fatalf("release asset evidence names %s", evidence.Release())
+	}
+	evidence.ReleaseSHA256 = strings.Repeat("c", 64)
+	if err := evidence.Validate(); err != nil || evidence.Release() != evidence.ReleaseSHA256 {
+		t.Fatalf("layer evidence release %s: %v", evidence.Release(), err)
+	}
+	for _, release := range []string{evidence.Report.ArtifactSHA256, "sha256:" + strings.Repeat("c", 64), strings.Repeat("C", 64)} {
+		changed := evidence
+		changed.ReleaseSHA256 = release
+		if err := changed.Validate(); err == nil {
+			t.Fatalf("accepted release digest %q", release)
+		}
+	}
+}
+
 func componentMetadata(platform string) string {
 	return `{"metadata_version":1,"transport":"wasm-component","id":"example","name":"Example","description":"Example for ` + platform + `","license":"MIT","repository":"https://github.com/publisher/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/analyzer@0.2.0","wit_sha256":"` + strings.Repeat("a", 64) + `"}`
 }

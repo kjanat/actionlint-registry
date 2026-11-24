@@ -43,7 +43,7 @@ func TestAdmissionRejectsFailedCompatibility(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if admission.Evidence == nil || admission.Evidence.Report.Outcome != name || admission.Evidence.Report.ArtifactSHA256 != digest {
+				if len(admission.Evidence) != 1 || admission.Evidence[0].Report.Outcome != name || admission.Evidence[0].Report.ArtifactSHA256 != digest || admission.Evidence[0].ReleaseSHA256 != "" {
 					t.Fatalf("admission dropped its compatibility evidence: %+v", admission.Evidence)
 				}
 				return

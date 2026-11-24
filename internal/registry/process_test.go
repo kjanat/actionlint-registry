@@ -2,6 +2,7 @@ package registry
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -46,6 +47,18 @@ func TestMain(m *testing.M) {
 		if err != nil || os.Getenv("GH_TOKEN") != "" || bytes.Equal(data, []byte("crash")) {
 			os.Exit(7)
 		}
+		if bytes.HasPrefix(data, []byte("\x00asm\x0d\x00\x01\x00")) {
+			sum := sha256.Sum256(data)
+			exports := []string{"kjanat:actionlint/analyzer@0.2.0"}
+			if bytes.Contains(data, []byte(otherPlatformLayer)) {
+				exports = []string{"kjanat:actionlint/runner-provider@0.3.0"}
+			}
+			reply := compatibility.Report{SchemaVersion: compatibility.ProtocolVersion, ArtifactSHA256: hex.EncodeToString(sum[:]), Host: compatibility.Host{Name: "fixture", Revision: "host-a"}, Policy: "test/1", Outcome: "passed", Checks: []string{"sample"}, RunnerAsOf: runnerAsOf, Imports: []string{"wasi:cli/environment@0.2.0"}, Exports: exports}
+			if err = json.NewEncoder(os.Stdout).Encode(reply); err != nil {
+				os.Exit(8)
+			}
+			os.Exit(0)
+		}
 		outcome := string(data)
 		if outcome == "ignores-date" {
 			outcome, runnerAsOf = "passed", foreignDateFixture
@@ -86,7 +99,7 @@ func TestCheckerFailuresNeverMutateAdmission(t *testing.T) {
 			if err = os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			result, err := CheckCompatibility(t.Context(), executable, path, entry, "")
+			result, err := checkLocal(t.Context(), executable, path, entry, "")
 			if outcome == "crash" || outcome == "wrong-digest" {
 				if err == nil {
 					t.Fatal("invalid checker response became evidence")
@@ -105,10 +118,10 @@ func TestCheckerFailuresNeverMutateAdmission(t *testing.T) {
 	if err = os.WriteFile(path, []byte("passed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = CheckCompatibility(t.Context(), executable, path, entry, ""); err == nil {
+	if _, err = checkLocal(t.Context(), executable, path, entry, ""); err == nil {
 		t.Fatal("tampered artifact reached checker")
 	}
-	if _, err = CheckCompatibility(t.Context(), filepath.Join(t.TempDir(), "missing"), path, entry, ""); err == nil {
+	if _, err = checkLocal(t.Context(), filepath.Join(t.TempDir(), "missing"), path, entry, ""); err == nil {
 		t.Fatal("missing checker became evidence")
 	}
 }
@@ -164,7 +177,7 @@ func TestRecheckRecordsTodayWithoutStoredDate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store, index, entry, executable, path := recheckFixture(t, "passed", stored...)
 			start := time.Now()
-			evidence, err := store.Recheck(t.Context(), index, executable, path, entry)
+			evidence, err := recheckLocal(t.Context(), store, index, executable, path, entry)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -191,7 +204,7 @@ func TestRecheckReplaysDateOfEarliestObservation(t *testing.T) {
 		datedObservation(entry, "2026-12-08", first.Add(48*time.Hour)),
 		datedObservation(entry, "2026-12-10", first),
 		observation(entry, "passed"))
-	evidence, err := store.Recheck(t.Context(), index, executable, path, entry)
+	evidence, err := recheckLocal(t.Context(), store, index, executable, path, entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +220,7 @@ func TestRecheckRejectsCheckerIgnoringStoredDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Recheck(t.Context(), index, executable, path, entry); err == nil || !strings.Contains(err.Error(), "instead of") {
+	if _, err = recheckLocal(t.Context(), store, index, executable, path, entry); err == nil || !strings.Contains(err.Error(), "instead of") {
 		t.Fatalf("checker that ignored the stored date was accepted: %v", err)
 	}
 	after, err := store.Load(index)
@@ -218,7 +231,7 @@ func TestRecheckRejectsCheckerIgnoringStoredDate(t *testing.T) {
 
 func TestCheckRejectsDateOtherThanRegistryDate(t *testing.T) {
 	_, _, entry, executable, path := recheckFixture(t, "ignores-date")
-	if _, err := CheckCompatibility(t.Context(), executable, path, entry, ""); err == nil || !strings.Contains(err.Error(), "\""+foreignDateFixture+"\" instead of") {
+	if _, err := checkLocal(t.Context(), executable, path, entry, ""); err == nil || !strings.Contains(err.Error(), "\""+foreignDateFixture+"\" instead of") {
 		t.Fatalf("report dated %s was accepted without a requested date: %v", foreignDateFixture, err)
 	}
 }
@@ -228,7 +241,7 @@ func TestCheckPassesTodayToProtocol2Checker(t *testing.T) {
 	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v2"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s"}`, entry.Submission.SHA256)
 	checker, argsLog := shellChecker(t, 2, report)
 	start := time.Now()
-	evidence, err := CheckCompatibility(t.Context(), checker, path, entry, "")
+	evidence, err := checkLocal(t.Context(), checker, path, entry, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +293,7 @@ func TestRecheckGivesProtocol1CheckerNoDate(t *testing.T) {
 	store, index, entry, _, path := recheckFixture(t, "passed", datedObservation(entry, "2026-12-08", time.Now().UTC()))
 	report := fmt.Sprintf(`{"schema_version":1,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v1"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"]}`, entry.Submission.SHA256)
 	checker, argsLog := shellChecker(t, 1, report)
-	evidence, err := store.Recheck(t.Context(), index, checker, path, entry)
+	evidence, err := recheckLocal(t.Context(), store, index, checker, path, entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +313,7 @@ func TestRecheckGivesProtocol1CheckerNoDate(t *testing.T) {
 func TestCheckRejectsUnknownCheckerProtocol(t *testing.T) {
 	_, _, entry, _, path := recheckFixture(t, "passed")
 	checker, _ := shellChecker(t, 4, "{}")
-	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "unsupported checker protocol") {
+	if _, err := checkLocal(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "unsupported checker protocol") {
 		t.Fatalf("protocol 4 checker was called: %v", err)
 	}
 }
@@ -316,7 +329,7 @@ func TestCheckRejectsAbnormalProtocolProbe(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			checker := writeShellChecker(t, t.TempDir(), body)
-			if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "checker protocol probe") {
+			if _, err := checkLocal(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "checker protocol probe") {
 				t.Fatalf("abnormal probe was not reported as a probe failure: %v", err)
 			}
 		})
@@ -334,9 +347,31 @@ func TestCheckRejectsPanickingProtocolProbe(t *testing.T) {
 	}
 	_, _, entry, _, path := recheckFixture(t, "passed")
 	checker := writeShellChecker(t, t.TempDir(), panickingCheckerVariable+"=1 exec '"+executable+"' \"$@\"\n")
-	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "checker protocol probe failed: exit status 2") {
+	if _, err := checkLocal(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "checker protocol probe failed: exit status 2") {
 		t.Fatalf("panicking probe was not reported as a probe failure: %v", err)
 	}
+}
+
+func checkLocal(ctx context.Context, executable, path string, entry Entry, runnerAsOf string) (compatibility.Evidence, error) {
+	observed, err := CheckCompatibility(ctx, executable, path, entry, runnerAsOf, nil)
+	if err != nil {
+		return compatibility.Evidence{}, err
+	}
+	if len(observed) != 1 {
+		return compatibility.Evidence{}, fmt.Errorf("a release asset check returned %d observations", len(observed))
+	}
+	return observed[0], nil
+}
+
+func recheckLocal(ctx context.Context, store EvidenceStore, index Index, executable, path string, entry Entry) (compatibility.Evidence, error) {
+	observed, err := store.Recheck(ctx, index, executable, path, entry, nil)
+	if err != nil {
+		return compatibility.Evidence{}, err
+	}
+	if len(observed) != 1 {
+		return compatibility.Evidence{}, fmt.Errorf("a release asset recheck returned %d observations", len(observed))
+	}
+	return observed[0], nil
 }
 
 func TestCheckKeepsProtocol3Interfaces(t *testing.T) {
@@ -346,7 +381,7 @@ func TestCheckKeepsProtocol3Interfaces(t *testing.T) {
 		return fmt.Sprintf(`{"schema_version":%d,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v3"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s","imports":[%q],"exports":[%q]}`, version, entry.Submission.SHA256, imports[0], exports[0])
 	}
 	checker, _ := shellChecker(t, 3, report(3))
-	evidence, err := CheckCompatibility(t.Context(), checker, path, entry, "2026-12-08")
+	evidence, err := checkLocal(t.Context(), checker, path, entry, "2026-12-08")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +389,7 @@ func TestCheckKeepsProtocol3Interfaces(t *testing.T) {
 		t.Fatalf("protocol 3 evidence lost its interfaces: %+v", evidence.Report)
 	}
 	checker, _ = shellChecker(t, 2, report(2))
-	if _, err := CheckCompatibility(t.Context(), checker, path, entry, "2026-12-08"); err == nil {
+	if _, err := checkLocal(t.Context(), checker, path, entry, "2026-12-08"); err == nil {
 		t.Fatal("protocol 2 report with interfaces became evidence")
 	}
 }

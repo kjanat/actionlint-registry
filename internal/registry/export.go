@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -97,25 +96,19 @@ func export(index Index, directory string, statuses []ReleaseStatus, downloads *
 		if err := item.Validate(); err != nil {
 			return err
 		}
-		accepted := false
-		for _, entry := range index.Entries {
-			if entry.Submission.Digest() == item.Report.ArtifactSHA256 {
-				accepted = true
-			}
-		}
-		if !accepted {
-			return errors.New("cannot export evidence for an unknown artifact")
+		if err := acceptedRelease(index, item); err != nil {
+			return fmt.Errorf("cannot export evidence: %w", err)
 		}
 		name, err := evidenceName(item)
 		if err != nil {
 			return err
 		}
-		path := "compatibility/" + item.Report.ArtifactSHA256 + "/" + name
+		path := "compatibility/" + item.Release() + "/" + name
 		if err = WriteJSON(filepath.Join(directory, filepath.FromSlash(path)), item); err != nil {
 			return err
 		}
-		observations[item.Report.ArtifactSHA256] = append(observations[item.Report.ArtifactSHA256], CompatibilityLink{Host: item.Report.Host, Policy: item.Report.Policy, Outcome: item.Report.Outcome, Report: "../../" + path})
-		releases[item.Report.ArtifactSHA256] = append(releases[item.Report.ArtifactSHA256], item)
+		observations[item.Release()] = append(observations[item.Release()], CompatibilityLink{Host: item.Report.Host, Policy: item.Report.Policy, Outcome: item.Report.Outcome, Report: "../../" + path})
+		releases[item.Release()] = append(releases[item.Release()], item)
 	}
 	catalog := Catalog{SchemaVersion: 1, Statuses: "statuses.json", Plugins: []CatalogPlugin{}}
 	manifests := map[string]PluginManifest{}
