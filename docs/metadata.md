@@ -75,7 +75,9 @@ the provider with a missing snapshot through actionlint's own runner resolution,
 which rejects invalid answers and support catalogues. Targets describe supported
 platforms, so their order does not affect the comparison. The package `id`,
 display `name` and `plugin_version` identify the distributed release and may
-differ from the provider descriptor.
+differ from the provider descriptor. The adapter rejects a provider that takes the
+name of an actionlint built-in provider for one of that built-in's targets, such
+as `github` or `snapshot` for the `github` target; actionlint never selects it there.
 
 ## Process manifests
 

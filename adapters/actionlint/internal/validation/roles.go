@@ -10,6 +10,7 @@ import (
 	"actionlint.kjanat.dev/v2/internal/input/workspace"
 	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
 	"actionlint.kjanat.dev/v2/internal/model/rule"
+	"actionlint.kjanat.dev/v2/internal/model/runners"
 	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
 	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
 	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
@@ -72,6 +73,15 @@ func checkRunnerProvider(ctx context.Context, registration runnerapi.Registratio
 	}
 	if err := declared.matches(descriptor); err != nil {
 		return Result{}, err
+	}
+	for _, builtin := range []runnerapi.Provider{runners.GitHubProvider(runners.KnownLabels(nil)), runners.SnapshotProvider()} {
+		reserved := builtin.RunnerDescriptor()
+		if reserved.Name != descriptor.Name {
+			continue
+		}
+		if target := slices.IndexFunc(descriptor.Targets, func(target string) bool { return slices.Contains(reserved.Targets, target) }); target >= 0 {
+			return Result{}, fmt.Errorf("runner provider name %q is reserved by actionlint's built-in provider for target %q", descriptor.Name, descriptor.Targets[target])
+		}
 	}
 	// A generic checker has no vendor dataset. Missing evidence must still produce
 	// a valid answer for each selector, without fetching resources during analysis.

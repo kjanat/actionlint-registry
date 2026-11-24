@@ -192,24 +192,41 @@ func TestRunnerAnswersFollowHostResolution(t *testing.T) {
 			return answers
 		}
 	}
-	for name, answer := range map[string]func(runnerapi.Request) []runnerapi.Answer{
-		"zero-value": func(request runnerapi.Request) []runnerapi.Answer {
-			return make([]runnerapi.Answer, len(request.Selectors))
-		},
-		"extra-answer": func(request runnerapi.Request) []runnerapi.Answer {
-			return answerWith(nil)(runnerapi.Request{Scope: request.Scope, Selectors: make([]runnerapi.Selector, 2)})
-		},
-		"foreign-scope":      scoped(func(answer *runnerapi.Answer) { answer.DatasetStatus.Scope = "other/repo" }),
-		"no-dataset":         scoped(func(answer *runnerapi.Answer) { answer.DatasetStatus.DatasetID = "" }),
-		"nil-resolution":     scoped(func(answer *runnerapi.Answer) { answer.Resolution = nil }),
-		"invalid-os":         answerWith(runnerapi.Resolved{Candidates: []runnerapi.Candidate{{Name: "queue", OS: "plan9"}}}),
-		"invalid-hosting":    answerWith(runnerapi.Resolved{Candidates: []runnerapi.Candidate{{Name: "queue", Hosting: "cloud"}}}),
-		"invalid-case":       answerWith(runnerapi.Resolved{Candidates: []runnerapi.Candidate{{Name: "queue", CaseSensitivity: "mixed"}}}),
-		"unrelated-position": answerWith(runnerapi.NoMatch{Rejections: []runnerapi.Rejection{{Reason: "unknown label", Position: sourcetext.Position{Line: 99, Column: 1}}}}),
+	unknown := runnerapi.Unknown{Reason: "registry fixture"}
+	for name, test := range map[string]struct {
+		answer func(runnerapi.Request) []runnerapi.Answer
+		error  string
+	}{
+		"no-answers": {func(runnerapi.Request) []runnerapi.Answer { return []runnerapi.Answer{} }, "returned 0 answers for 1 selectors"},
+		"extra-answer": {func(request runnerapi.Request) []runnerapi.Answer {
+			return append(answerWith(unknown)(request), answerWith(unknown)(request)...)
+		}, "returned 2 answers for 1 selectors"},
+		"foreign-scope":      {scoped(func(answer *runnerapi.Answer) { answer.DatasetStatus.Scope = "other/repo" }), "scope does not match"},
+		"no-dataset":         {scoped(func(answer *runnerapi.Answer) { answer.DatasetStatus.DatasetID = "" }), "no dataset identity"},
+		"nil-resolution":     {scoped(func(answer *runnerapi.Answer) { answer.Resolution = nil }), "invalid runner resolution"},
+		"invalid-os":         {answerWith(runnerapi.Resolved{Candidates: []runnerapi.Candidate{{Name: "queue", OS: "plan9"}}}), "invalid runner OS"},
+		"invalid-hosting":    {answerWith(runnerapi.Resolved{Candidates: []runnerapi.Candidate{{Name: "queue", Hosting: "cloud"}}}), "invalid runner hosting"},
+		"invalid-case":       {answerWith(runnerapi.Resolved{Candidates: []runnerapi.Candidate{{Name: "queue", CaseSensitivity: "mixed"}}}), "invalid runner case sensitivity"},
+		"unrelated-position": {answerWith(runnerapi.NoMatch{Rejections: []runnerapi.Rejection{{Reason: "unknown label", Position: sourcetext.Position{Line: 99, Column: 1}}}}), "unrelated source position"},
 	} {
-		if _, err := admitFakeRunner(t, fakeRunner{answer: answer}); err == nil {
-			t.Fatalf("%s answer admitted", name)
+		if _, err := admitFakeRunner(t, fakeRunner{answer: test.answer}); err == nil || !strings.Contains(err.Error(), test.error) {
+			t.Fatalf("%s: want the host's %q rejection, got %v", name, test.error, err)
 		}
+	}
+}
+
+func TestRunnerProviderNameReservedByHost(t *testing.T) {
+	for _, descriptor := range []runnerapi.Descriptor{
+		{Name: "github", Version: "1", Targets: []string{"buildkite", "github"}},
+		{Name: "snapshot", Version: "1", Targets: []string{"github"}},
+	} {
+		_, err := admitFakeRunner(t, fakeRunner{descriptor: descriptor})
+		if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), `"`+descriptor.Name+`"`) {
+			t.Fatalf("%s on github: want a reserved-name rejection, got %v", descriptor.Name, err)
+		}
+	}
+	if _, err := admitFakeRunner(t, fakeRunner{descriptor: runnerapi.Descriptor{Name: "github", Version: "1", Targets: []string{"buildkite"}}}); err != nil {
+		t.Fatalf("a github-named provider for another target was rejected: %v", err)
 	}
 }
 
