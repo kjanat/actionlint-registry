@@ -386,11 +386,15 @@ func TestCheckOfUnpublishedOCIChecksEveryPlatformLayer(t *testing.T) {
 	config := write("application/vnd.oci.empty.v1+json", []byte("{}"))
 	var manifests, layers []layoutDescriptor
 	for _, platform := range []string{"linux", "darwin"} {
-		metadata := `{"metadata_version":1,"transport":"wasm-component","id":"example","name":"Example","description":"Example for ` + platform + `","license":"MIT","repository":"https://github.com/publisher/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/analyzer@0.2.0","wit_sha256":"` + strings.Repeat("a", 64) + `"}`
+		metadata := `{"metadata_version":1,"transport":"wasm-component","id":"example","name":"Example","description":"Example","license":"MIT","repository":"https://github.com/publisher/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/analyzer@0.2.0","wit_sha256":"` + strings.Repeat("a", 64) + `"}`
 		section := append([]byte{17}, "actionlint.plugin"...)
 		section = append(section, metadata...)
 		component := append([]byte("\x00asm\x0d\x00\x01\x00\x00"), byte(len(section)&127)|128, byte(len(section)>>7))
-		layer := write("application/wasm", append(component, section...))
+		component = append(component, section...)
+		label := append([]byte{22}, "registry-test.platform"...)
+		component = append(component, 0, byte(len(label)+len(platform)))
+		component = append(component, label...)
+		layer := write("application/wasm", append(component, platform...))
 		layers = append(layers, layer)
 		manifests = append(manifests, write(manifestType, document(map[string]any{"schemaVersion": 2, "mediaType": manifestType, "config": config, "layers": []layoutDescriptor{layer}})))
 	}

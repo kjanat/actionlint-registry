@@ -1,9 +1,11 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -217,8 +219,12 @@ func verifyOCI(data []byte, digest string, size int64) error {
 	return nil
 }
 
+// actionlint installs a platform only when its metadata equals the release's
+// metadata after JSON canonicalization.
 func sameDeclaration(a, b artifact.Declaration) bool {
-	return a.Kind == b.Kind && a.PluginID == b.PluginID && a.PluginVersion == b.PluginVersion && a.Repository == b.Repository && a.Contract == b.Contract
+	left, right := jsontext.Value(bytes.Clone(a.Metadata)), jsontext.Value(bytes.Clone(b.Metadata))
+	canonical := left.Canonicalize(jsontext.CanonicalizeRawInts(false), jsontext.CanonicalizeRawFloats(false)) == nil && right.Canonicalize(jsontext.CanonicalizeRawInts(false), jsontext.CanonicalizeRawFloats(false)) == nil
+	return canonical && bytes.Equal(left, right) && a.Kind == b.Kind && a.PluginID == b.PluginID && a.PluginVersion == b.PluginVersion && a.Repository == b.Repository && a.Contract == b.Contract
 }
 
 // Inspect binds the discovery declaration to the root index/manifest digest,
@@ -404,7 +410,7 @@ func inspectOCI(ctx context.Context, distribution Distribution, source ociObject
 			return reject("OCI layer media type disagrees with package kind")
 		}
 		if result.PluginID != "" && !sameDeclaration(result, declared) {
-			return reject("OCI platform variants disagree on discovery identity or contract")
+			return reject("OCI platform variants disagree on discovery metadata or contract")
 		}
 		result = declared
 		if source.primary != nil {

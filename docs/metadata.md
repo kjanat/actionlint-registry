@@ -167,6 +167,9 @@ it hashed in `artifact_sha256`, and its record names the root manifest digest in
 `--version`, the reference must equal the accepted release's reference, and the
 registry stores and links the records under its root digest. Without them, `check`
 prints one record per line, and `--report` writes the records as a JSON array.
+Inspection rejects an OCI release whose platform layers carry different embedded
+metadata, compared as canonical JSON. actionlint installs a platform only when its
+metadata equals the release's.
 
 Before each check the registry runs the checker with `--protocol`, with a
 5-second limit. A protocol 2 or 3 checker prints its version; a protocol 1

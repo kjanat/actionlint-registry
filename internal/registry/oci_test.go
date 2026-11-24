@@ -552,19 +552,24 @@ func TestMergeCandidateRequiresEvidence(t *testing.T) {
 
 const otherPlatformLayer = "other-platform"
 
-func componentLayer(platform string) []byte {
-	metadata := componentMetadata(platform)
-	section := append([]byte{17}, "actionlint.plugin"...)
-	section = append(section, metadata...)
-	layer := []byte("\x00asm\x0d\x00\x01\x00\x00")
-	for size := len(section); ; size >>= 7 {
+func customSection(name, payload string) []byte {
+	body := append([]byte{byte(len(name))}, name...)
+	body = append(body, payload...)
+	section := []byte{0}
+	for size := len(body); ; size >>= 7 {
 		if size < 128 {
-			layer = append(layer, byte(size))
+			section = append(section, byte(size))
 			break
 		}
-		layer = append(layer, byte(size&127)|128)
+		section = append(section, byte(size&127)|128)
 	}
-	return append(layer, section...)
+	return append(section, body...)
+}
+
+func componentLayer(platform string) []byte {
+	layer := []byte("\x00asm\x0d\x00\x01\x00")
+	layer = append(layer, customSection("actionlint.plugin", componentMetadata("oci"))...)
+	return append(layer, customSection("registry-test.platform", platform)...)
 }
 
 func ociComponentRelease(t *testing.T, layers ...[]byte) (Service, Receipt, *OCIInspector) {
@@ -669,5 +674,24 @@ func TestReleaseAssetEvidenceCannotNameARelease(t *testing.T) {
 	evidence.ReleaseSHA256, evidence.Report.ArtifactSHA256 = entry.Submission.Digest(), strings.Repeat("d", 64)
 	if err := (EvidenceStore{Directory: filepath.Join(t.TempDir(), "compatibility")}).Add(index, evidence); err == nil {
 		t.Fatal("stored layer evidence for a release asset")
+	}
+}
+
+func TestOCIPlatformsMustShareMetadata(t *testing.T) {
+	header := []byte("\x00asm\x0d\x00\x01\x00")
+	layer := func(metadata, platform string) []byte {
+		data := append(slices.Clone(header), customSection("actionlint.plugin", metadata)...)
+		return append(data, customSection("registry-test.platform", platform)...)
+	}
+	metadata := componentMetadata("oci")
+	reordered := strings.Replace(metadata, `{"metadata_version":1,`, `{`, 1)
+	reordered = strings.TrimSuffix(reordered, "}") + `,"metadata_version":1}`
+	inspector, reference, _ := ociFixture(t, layer(metadata, "linux"), layer(reordered, "darwin"))
+	if _, err := inspector.Inspect(t.Context(), reference); err != nil {
+		t.Fatalf("platforms whose metadata differs only in member order were rejected: %v", err)
+	}
+	inspector, reference, _ = ociFixture(t, layer(metadata, "linux"), layer(componentMetadata("darwin"), "darwin"))
+	if _, err := inspector.Inspect(t.Context(), reference); err == nil || FailureDisposition(err) != "rejected" || !strings.Contains(err.Error(), "metadata") {
+		t.Fatalf("platforms with different metadata were accepted: %v", err)
 	}
 }
