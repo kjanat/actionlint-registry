@@ -1,6 +1,11 @@
 {
   "$id": "https://plugins.actionlint.kjanat.dev/schemas/index.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "pluginManifest": {
+      "$ref": "manifest.schema.json"
+    }
+  },
   "title": "Generated plugin catalog",
   "type": "object",
   "required": [
@@ -27,6 +32,7 @@
             }
           },
           "manifest": {
+            "description": "Relative URL of the per-plugin index. Validate that document with the pluginManifest definition.",
             "type": "string",
             "minLength": 1
           },

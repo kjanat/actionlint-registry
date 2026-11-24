@@ -267,8 +267,24 @@ actionlint --plugin 'https://publisher.example/plugin.wasm#sha256=...'
 Actionlint can install declared registry plugins with `actionlint plugin install`;
 configuration records the exact version and local candidates also bind a digest.
 Verified registry selections and artifact bytes live in the user cache. Disable a
-conflicting tool when replacing it, for example `--no-tool=shellcheck`. [Schemas](schemas/) describe
-submission, receipt, plugin, version and catalogue data.
+conflicting tool when replacing it, for example `--no-tool=shellcheck`.
+
+### Registry schema
+
+Download the [registry schema bundle](https://plugins.actionlint.kjanat.dev/schemas/registry.schema.json)
+to validate registry documents offline. The bundle validates the root `index.json`
+and includes the [individual schemas](schemas/) under their existing canonical IDs.
+Load the bundle once in a JSON Schema 2020-12 validator, then follow each relative
+URL against the document that contains it:
+
+| URL in the catalogue                     | Schema for the target                       |
+| ---------------------------------------- | ------------------------------------------- |
+| `plugins[].manifest` in `index.json`     | `index.schema.json#/$defs/pluginManifest`   |
+| `versions[].record` in a plugin manifest | `manifest.schema.json#/$defs/versionRecord` |
+
+Resolve these schema references relative to the bundle URL. Validate each JSON
+document after loading it. The registry export command writes the same bundle
+to `schemas/registry.schema.json` under its output directory.
 
 [Release status](docs/release-status.md) defines deprecation, withdrawal and
 permanent digest revocation. Audited status events remain separate from immutable

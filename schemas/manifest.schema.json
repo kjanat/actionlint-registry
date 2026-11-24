@@ -1,6 +1,11 @@
 {
   "$id": "https://plugins.actionlint.kjanat.dev/schemas/manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "versionRecord": {
+      "$ref": "version.schema.json"
+    }
+  },
   "title": "Generated per-plugin version manifest",
   "type": "object",
   "required": [
@@ -74,6 +79,7 @@
             "description": "Every top-level import of the component release, spelled as in the binary. Present together with exports when every observation of the release agrees."
           },
           "record": {
+            "description": "Relative URL of the immutable version record. Validate that document with the versionRecord definition.",
             "type": "string",
             "pattern": "^versions/[a-f0-9]{64}\\.json$"
           },
