@@ -271,12 +271,22 @@ conflicting tool when replacing it, for example `--no-tool=shellcheck`.
 
 ### Plugin configuration schemas
 
-To validate a plugin's settings in your actionlint config, find the plugin by
-selector in the [catalog](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.catalog.json)
-and look up its release tag in `versions`.
+To enable completion and validation in VS Code with the YAML extension, run this
+from your project root after configuring your plugins.
 
-`url` links to the schema for the newest active release that has one. If no
-active release has a schema, it links to the newest release that does.
+```sh
+actionlint config schema >.github/actionlint.local.schema.json
+```
+
+Set this as the first line of `.github/actionlint.yaml`.
+
+```yaml
+# yaml-language-server: $schema=./actionlint.local.schema.json
+```
+
+Run the command again when you change plugin versions. The
+[registry catalog](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.catalog.json)
+provides per-release schema URLs for clients that select schemas by plugin and tag.
 
 ### Registry schema
 
