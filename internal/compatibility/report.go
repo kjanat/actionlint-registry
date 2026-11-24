@@ -26,12 +26,18 @@ type Report struct {
 	Policy         string   `json:"policy"`
 	Outcome        string   `json:"outcome"`
 	Checks         []string `json:"checks"`
+	RunnerAsOf     string   `json:"runner_as_of,omitempty"`
 	Detail         string   `json:"detail,omitempty"`
 }
 
 func (r Report) Validate() error {
 	if r.SchemaVersion != ProtocolVersion || !digest.MatchString(r.ArtifactSHA256) || !bounded(r.Host.Name, 128) || !bounded(r.Host.Revision, 256) || !bounded(r.Policy, 256) || len(r.Detail) > 16384 || len(r.Checks) > 4096 {
 		return errors.New("invalid compatibility report identity or bounds")
+	}
+	if r.RunnerAsOf != "" {
+		if date, err := time.Parse(time.DateOnly, r.RunnerAsOf); err != nil || date.Format(time.DateOnly) != r.RunnerAsOf {
+			return errors.New("invalid runner assessment date")
+		}
 	}
 	switch r.Outcome {
 	case "passed":

@@ -2,6 +2,8 @@ package registry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,5 +57,21 @@ func TestAdmissionRejectsFailedCompatibility(t *testing.T) {
 				t.Fatalf("failed compatibility admitted or retried: %v", err)
 			}
 		})
+	}
+}
+
+func TestCheckerReportKeepsRunnerAssessmentDate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plugin.wasm")
+	if err := os.WriteFile(path, []byte("candidate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("candidate"))
+	digest := hex.EncodeToString(sum[:])
+	evidence, err := CheckArtifact(t.Context(), fakeChecker(t, digest, "passed", `["host-resolution"]`, `,"runner_as_of":"2026-12-08"`), path, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Report.RunnerAsOf != "2026-12-08" {
+		t.Fatalf("checker report lost its runner assessment date: %+v", evidence.Report)
 	}
 }

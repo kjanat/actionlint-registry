@@ -164,6 +164,8 @@ func TestCompatibilityReportStrictProtocol(t *testing.T) {
 		func(r *compatibility.Report) { r.Host.Revision = "" },
 		func(r *compatibility.Report) { r.Policy = "" },
 		func(r *compatibility.Report) { r.Checks = nil },
+		func(r *compatibility.Report) { r.RunnerAsOf = "2026-02-30" },
+		func(r *compatibility.Report) { r.RunnerAsOf = "2026-12-8" },
 	} {
 		changed := e.Report
 		mutate(&changed)

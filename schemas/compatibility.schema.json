@@ -65,6 +65,11 @@
           "minLength": 1,
           "maxLength": 256
         },
+        "runner_as_of": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "format": "date"
+        },
         "schema_version": {
           "const": 1
         }
