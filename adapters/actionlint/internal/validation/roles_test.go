@@ -1,11 +1,14 @@
 package validation
 
 import (
-	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
+	"context"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
+
+	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
 )
 
 const scriptMetadata = `{"metadata_version":1,"transport":"wasm-component","id":"echo-component","name":"Echo component","description":"Registry script fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/script-engine@0.2.0","wit_sha256":"c20d7e9e516166576fdf19bfd86e0843838179b12ad55350c33db8d04c2eaa9b","engine":{"name":"echo","version":"1.0.0"},"capabilities":{"script_shells":["python"]},"config_schema":{"type":"object"},"rules":[{"name":"echo","description":"Find a missing value","category":"correctness","subcategory":"python","maturity":"stable","provider":"echo-component","recommended":true,"documentation_url":"https://example.com/echo","options_schema":{"type":"object"},"fix_availability":"none"}]}`
@@ -110,3 +113,52 @@ func TestScriptComponent03RejectsMismatchedDeclaration(t *testing.T) {
 
 const scriptMetadata03 = `{"metadata_version":1,"transport":"wasm-component","id":"script-engine-0.3.0-fixture","name":"Script engine 0.3.0 fixture","description":"Registry script fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/script-engine@0.3.0","wit_sha256":"6c289637bd345bd66db965fe9084fb8e5a4f03b0d5655497025e2d1a05c36479","engine":{"name":"json1","version":"1.0.0"},"capabilities":{"script_shells":["bash"],"fixes":true,"reported_sources":true,"resources":["directory"]},"config_schema":{"type":"object"},"rules":[{"name":"json1","description":"Decode ShellCheck json1 output","category":"correctness","subcategory":"shell","maturity":"stable","provider":"script-engine-0.3.0-fixture","recommended":true,"documentation_url":"https://example.com/json1","options_schema":{"type":"object"}}]}`
 const templateMetadata03 = `{"metadata_version":1,"transport":"wasm-component","id":"template-script-engine-0.3.0-fixture","name":"Template script engine 0.3.0 fixture","description":"Registry template fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/script-engine@0.3.0","wit_sha256":"6c289637bd345bd66db965fe9084fb8e5a4f03b0d5655497025e2d1a05c36479","template_contract":"kjanat:actionlint/template-effects@0.1.0","engine":{"name":"template","version":"1.0.0"},"capabilities":{"script_shells":["bash"],"fixes":true,"reported_sources":true,"resources":["directory"]},"config_schema":{"type":"object"},"rules":[{"name":"template","description":"Report the first character of a snippet","category":"correctness","subcategory":"shell","maturity":"stable","provider":"template-script-engine-0.3.0-fixture","recommended":true,"documentation_url":"https://example.com/template","options_schema":{"type":"object"}}]}`
+
+const runner03ContractDigest = "e3034ea15784ba35ca54986d3f28c982693fd39aaa0a366b2730f95038655c71"
+const runnerMetadata03 = `{"metadata_version":1,"transport":"wasm-component","id":"runner-support-fixture","name":"Runner support fixture","description":"Registry runner 0.3.0 fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/runner-provider@0.3.0","wit_sha256":"` + runner03ContractDigest + `","descriptor":{"name":"runner-support-fixture","version":"1","targets":["github"]}}`
+
+func TestRunnerProvider03(t *testing.T) {
+	result, err := Validate(t.Context(), packagedFixture(t, "component-runners-0.3.0", runnerMetadata03))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PluginID != "runner-support-fixture" || !slices.Contains(result.Checks, "runner-support") || result.Contract != runnerInterface03+"#sha256="+runner03ContractDigest {
+		t.Fatalf("wrong 0.3 runner evidence: %+v", result)
+	}
+}
+
+type supportProvider struct {
+	support runnerapi.SupportCatalog
+}
+
+func (supportProvider) RunnerDescriptor() runnerapi.Descriptor {
+	return runnerapi.Descriptor{Name: "buildkite-runners", Version: "0.1.0", Targets: []string{"buildkite"}}
+}
+
+func (provider supportProvider) ResolveRunners(_ context.Context, request runnerapi.Request) (runnerapi.Response, error) {
+	return runnerapi.Response{Answers: make([]runnerapi.Answer, len(request.Selectors)), Support: provider.support}, nil
+}
+
+func TestRunnerSupportCatalogue(t *testing.T) {
+	var metadata embeddedMetadata
+	if err := jsonv2.Unmarshal([]byte(runnerMetadata), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	policy := runnerapi.SupportPolicy{ID: "arm32", Description: "ARM32 support retirement", URL: "https://example.com/runner-support", Capability: runnerapi.JobExecution}
+	valid := runnerapi.SupportCatalog{DatasetStatus: runnerapi.DatasetStatus{DatasetID: "registry:v1", Scope: "registry-smoke", Freshness: runnerapi.Fresh, Complete: true}, Policies: []runnerapi.SupportPolicy{policy}}
+	for name, support := range map[string]runnerapi.SupportCatalog{"absent": {}, "valid": valid} {
+		if _, err := checkRunnerProvider(t.Context(), supportProvider{support}, metadata); err != nil {
+			t.Fatalf("%s catalogue rejected: %v", name, err)
+		}
+	}
+	foreign := valid
+	foreign.DatasetStatus.Scope = "other/repo"
+	unsafe := valid
+	unsafe.Policies = []runnerapi.SupportPolicy{policy}
+	unsafe.Policies[0].URL = "javascript:alert(1)"
+	for name, support := range map[string]runnerapi.SupportCatalog{"foreign-scope": foreign, "unsafe-url": unsafe} {
+		if _, err := checkRunnerProvider(t.Context(), supportProvider{support}, metadata); err == nil {
+			t.Fatalf("%s catalogue accepted", name)
+		}
+	}
+}

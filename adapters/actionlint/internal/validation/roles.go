@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"actionlint.kjanat.dev/v2/internal/base/sourcetext"
+	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
 	"actionlint.kjanat.dev/v2/internal/model/rule"
 	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
 	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
@@ -56,7 +58,11 @@ func validateRunnerComponent(ctx context.Context, plugin *component.Plugin, meta
 	if !plugin.HasRunnerProvider() {
 		return Result{}, errors.New("component does not implement its declared runner-provider role")
 	}
-	descriptor := plugin.RunnerDescriptor()
+	return checkRunnerProvider(ctx, plugin, metadata)
+}
+
+func checkRunnerProvider(ctx context.Context, provider runnerapi.Provider, metadata embeddedMetadata) (Result, error) {
+	descriptor := provider.RunnerDescriptor()
 	declared, err := decodeDescriptor[runnerDeclaration](metadata.Descriptor)
 	if err != nil {
 		return Result{}, err
@@ -66,19 +72,23 @@ func validateRunnerComponent(ctx context.Context, plugin *component.Plugin, meta
 	}
 	// A generic checker has no vendor dataset. Missing evidence must still produce
 	// a valid answer for each selector, without fetching resources during analysis.
+	asOf := lifecycle.DateOf(time.Now())
 	for _, target := range descriptor.Targets {
-		request := runnerapi.Request{Target: target, Scope: "registry-smoke", Snapshot: runnerapi.RunnerSnapshot{Scope: "registry-smoke", Freshness: runnerapi.Missing},
+		request := runnerapi.Request{AsOf: asOf, Target: target, Scope: "registry-smoke", Snapshot: runnerapi.RunnerSnapshot{Scope: "registry-smoke", Freshness: runnerapi.Missing},
 			Selectors: []runnerapi.Selector{{Labels: []runnerapi.Constraint{{Value: runnerapi.Literal("registry-smoke"), Position: sourcetext.Position{Line: 1, Column: 1}}}}}}
 		for attempt := range 2 {
-			response, err := plugin.ResolveRunners(ctx, request)
+			response, err := provider.ResolveRunners(ctx, request)
 			if err != nil {
 				return Result{}, fmt.Errorf("runner invocation %d: %w", attempt+1, err)
 			}
 			if len(response.Answers) != len(request.Selectors) {
 				return Result{}, errors.New("runner returned the wrong answer count")
 			}
+			if err := runnerapi.ValidateSupportCatalog(response.Support, request.Scope); err != nil {
+				return Result{}, fmt.Errorf("runner invocation %d: %w", attempt+1, err)
+			}
 		}
 	}
 	return Result{Kind: "component", PluginID: metadata.ID, Rules: []string{}, HostCommit: HostCommit,
-		Checks: []string{"host-wit-contract", "runner-provider", "runner-descriptor", "missing-snapshot", "repeated-sample"}}, nil
+		Checks: []string{"host-wit-contract", "runner-provider", "runner-descriptor", "missing-snapshot", "runner-support", "repeated-sample"}}, nil
 }

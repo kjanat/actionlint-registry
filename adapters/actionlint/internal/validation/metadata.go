@@ -15,6 +15,7 @@ import (
 
 	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
+	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
 
 	"actionlint.kjanat.dev/v2/internal/model/rule"
 	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
@@ -23,14 +24,15 @@ import (
 // ErrUnsupportedContract identifies a contract version this checker does not implement.
 var ErrUnsupportedContract = errors.New("contract is not supported by this checker")
 
-const componentInterface = "kjanat:actionlint/analyzer@0.2.0"
-const scriptInterface = "kjanat:actionlint/script-engine@0.2.0"
-const scriptInterface03 = "kjanat:actionlint/script-engine@0.3.0"
-const runnerInterface = "kjanat:actionlint/runner-provider@0.2.0"
+const componentInterface = component.AnalyzerInterface
+const scriptInterface = component.ScriptEngineInterface
+const scriptInterface03 = component.ScriptEngine03Interface
+const runnerInterface = component.RunnerInterface
+const runnerInterface03 = component.Runner03Interface
 
 func supportedComponent(iface string) bool {
 	switch iface {
-	case componentInterface, scriptInterface, scriptInterface03, runnerInterface:
+	case componentInterface, scriptInterface, scriptInterface03, runnerInterface, runnerInterface03:
 		return true
 	default:
 		return false
@@ -175,7 +177,7 @@ func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance
 			if _, err := decodeDescriptor[componentDeclaration](metadata.Descriptor); err != nil {
 				return metadata, err
 			}
-		case runnerInterface:
+		case runnerInterface, runnerInterface03:
 			if _, err := decodeDescriptor[runnerDeclaration](metadata.Descriptor); err != nil {
 				return metadata, err
 			}

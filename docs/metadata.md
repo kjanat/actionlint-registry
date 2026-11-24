@@ -68,10 +68,11 @@ For example, a component can declare:
 The checksum above is illustrative. Unknown contracts are catalogued without a
 compatibility claim.
 
-For `kjanat:actionlint/runner-provider@0.2.0`, `descriptor` contains the provider's
-`name`, `version` and `targets` from its runtime `describe()` result. The Wasm
-compatibility adapter compares all three fields and exercises the provider with
-a missing snapshot. Targets describe supported platforms, so their order does
+For `kjanat:actionlint/runner-provider@0.2.0` and `@0.3.0`, `descriptor` contains
+the provider's `name`, `version` and `targets` from its runtime `describe()`
+result. The Wasm compatibility adapter compares all three fields and exercises
+the provider with a missing snapshot. It rejects a support catalogue that fails
+the host's catalogue validation. Targets describe supported platforms, so their order does
 not affect the comparison. The package `id`, display `name` and `plugin_version`
 identify the distributed release and may differ from the provider descriptor.
 

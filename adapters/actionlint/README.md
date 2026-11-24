@@ -19,13 +19,14 @@ The process boundary does not provide an operating-system sandbox.
 
 The checker uses the actionlint v2 revision required in `go.mod` and reports it
 from the build. Its tests load runtime fixtures from that host module.
-It supports core ABI 1, analyzer and runner-provider WIT roles at 0.2.0, and
-script-engine at 0.2.0 and 0.3.0. A template-effects extension must match its
-script-engine version.
+It supports core ABI 1, the analyzer WIT role at 0.2.0, and runner-provider and
+script-engine at 0.2.0 and 0.3.0. The host module supplies these interface names.
+A template-effects extension must match its script-engine version.
 The host validates exported component types. A WIT source checksum also covers
 documentation comments, so a different checksum alone does not reject an analyzer.
 Script engines validate default options and repeated diagnostic calls. Runner
-providers resolve a selector with missing evidence for each declared target;
+providers resolve a selector with missing evidence for each declared target and
+return a valid support catalogue;
 vendor-specific snapshot behavior belongs in the publisher's candidate fixtures.
 Unknown contracts return `unsupported`; understood contracts that fail validation
 return `failed`. Admission and the shared candidate check reject `failed`.

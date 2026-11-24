@@ -33,7 +33,7 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 	switch metadata.Interface {
 	case scriptInterface, scriptInterface03:
 		return validateScriptComponent(ctx, plugin)
-	case runnerInterface:
+	case runnerInterface, runnerInterface03:
 		return validateRunnerComponent(ctx, plugin, metadata)
 	}
 	if !plugin.HasAnalyzer() {
