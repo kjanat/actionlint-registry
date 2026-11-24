@@ -159,12 +159,14 @@ report under `registry/compatibility` together with the accepted record. With
 `compatibility` directory unless `--compatibility` names another. `merge` rejects
 a new version that has no report in `--candidate-compatibility`.
 
-For an OCI release, admission and `check` run the checker on the primary layer of
-each platform. Each report names the layer it hashed in `artifact_sha256`, and
-its record names the release's root manifest digest in `release_sha256`. Pass the
-release's pinned `oci://` reference as `check --artifact`. The registry stores
-and links these records under the root digest. `check` accepts an OCI reference
-only together with `--plugin` and `--version`.
+For an OCI release or candidate, admission, `check` and the shared candidate check
+run the checker on the primary layer of each platform. Each report names the layer
+it hashed in `artifact_sha256`, and its record names the root manifest digest in
+`release_sha256`. Pass the pinned `oci://` reference as `check --artifact`, and add
+`--oci-layout` to read the graph from a local image layout. With `--plugin` and
+`--version`, the reference must equal the accepted release's reference, and the
+registry stores and links the records under its root digest. Without them, `check`
+prints one record per line, and `--report` writes the records as a JSON array.
 
 Before each check the registry runs the checker with `--protocol`, with a
 5-second limit. A protocol 2 or 3 checker prints its version; a protocol 1

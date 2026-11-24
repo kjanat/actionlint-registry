@@ -293,22 +293,24 @@ go run ./cmd/registry check --checker ./actionlint-checker \
   --artifact plugin.wasm --plugin github.com/owner/plugin --version v1.0.0
 ```
 
-For an accepted OCI release, pass its pinned `oci://` reference as `--artifact`.
+For an OCI release or candidate, pass its pinned `oci://` reference as `--artifact`,
+and `--oci-layout` for a local image layout.
 Omit `--plugin` and `--version` to check unpublished bytes without creating a tag
 or accepted version. The report is an observation of that artifact and host; it
 does not authorize publication. The full candidate check additionally exercises
 installation and the plugin's behavioral fixture through the supported CLI.
 
 Reports are independent immutable files under
-`registry/compatibility/<artifact-sha256>/<report-sha256>.json`. They identify the
+`registry/compatibility/<release-sha256>/<report-sha256>.json`. They identify the
 exact artifact, host revision, checker executable checksum, policy, time, and outcome.
 The catalogue links to these reports per version. Adding a report never rewrites
 an accepted release. Existing records retain their historical inline validation.
 
 The checker is trusted operator code. It runs with a deadline and bounded output,
 without inherited registry credentials. This process boundary is not an operating
-system sandbox. Admission runs the bundled checker on the downloaded asset and
-rejects a `failed` outcome; `unsupported` contracts and OCI sources are admitted.
+system sandbox. Admission runs the bundled checker on the downloaded asset, or on
+each platform layer of an OCI release, and rejects a `failed` outcome; `unsupported`
+contracts are admitted.
 A crashing checker makes the submission retryable. The shared candidate check runs
 the same checker before a release exists. See [metadata and checks](docs/metadata.md).
 

@@ -352,14 +352,87 @@ func TestAdmissionWorkflowCarriesEvidence(t *testing.T) {
 	}
 }
 
-func TestCheckOfUnpublishedOCIRequiresAcceptedRelease(t *testing.T) {
-	store := filepath.Join(t.TempDir(), "plugins")
+type layoutDescriptor struct {
+	MediaType string `json:"mediaType"`
+	Digest    string `json:"digest"`
+	Size      int    `json:"size"`
+}
+
+func TestCheckOfUnpublishedOCIChecksEveryPlatformLayer(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the fake checker hashes layers with sha256sum")
+	}
+	root := t.TempDir()
+	layout := filepath.Join(root, "layout")
+	if err := os.MkdirAll(filepath.Join(layout, "blobs", "sha256"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(mediaType string, data []byte) layoutDescriptor {
+		sum := sha256.Sum256(data)
+		digest := hex.EncodeToString(sum[:])
+		if err := os.WriteFile(filepath.Join(layout, "blobs", "sha256", digest), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return layoutDescriptor{MediaType: mediaType, Digest: "sha256:" + digest, Size: len(data)}
+	}
+	document := func(value any) []byte {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	const manifestType, indexType = "application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.index.v1+json"
+	config := write("application/vnd.oci.empty.v1+json", []byte("{}"))
+	var manifests, layers []layoutDescriptor
+	for _, platform := range []string{"linux", "darwin"} {
+		metadata := `{"metadata_version":1,"transport":"wasm-component","id":"example","name":"Example","description":"Example for ` + platform + `","license":"MIT","repository":"https://github.com/publisher/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/analyzer@0.2.0","wit_sha256":"` + strings.Repeat("a", 64) + `"}`
+		section := append([]byte{17}, "actionlint.plugin"...)
+		section = append(section, metadata...)
+		component := append([]byte("\x00asm\x0d\x00\x01\x00\x00"), byte(len(section)&127)|128, byte(len(section)>>7))
+		layer := write("application/wasm", append(component, section...))
+		layers = append(layers, layer)
+		manifests = append(manifests, write(manifestType, document(map[string]any{"schemaVersion": 2, "mediaType": manifestType, "config": config, "layers": []layoutDescriptor{layer}})))
+	}
+	index := write(indexType, document(map[string]any{"schemaVersion": 2, "mediaType": indexType, "manifests": manifests}))
+	if err := os.WriteFile(filepath.Join(layout, "index.json"), document(map[string]any{"schemaVersion": 2, "mediaType": indexType, "manifests": []layoutDescriptor{index}}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report := `{"schema_version":3,"artifact_sha256":"%s","host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["sample"],"runner_as_of":"%s","imports":[],"exports":["kjanat:actionlint/analyzer@0.2.0"]}`
+	script := "#!/bin/sh\nif [ \"$1\" = --protocol ]; then printf '3\\n'; exit 0; fi\nif [ \"$1\" = --runner-as-of ]; then date=$2; shift 2; fi\n[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nset -- $(sha256sum \"$1\")\nprintf '" + report + "\\n' \"$1\" \"$date\"\n"
+	checker := filepath.Join(root, "checker")
+	if err := os.WriteFile(checker, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(root, "plugins")
 	if err := os.Mkdir(store, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	reference := "oci://registry.example/plugins/example@sha256:" + strings.Repeat("a", 64)
-	err := run(t.Context(), []string{"check", "--store", store, "--checker", "unused-checker", "--artifact", reference})
-	if err == nil || !strings.Contains(err.Error(), "--plugin and --version") {
-		t.Fatalf("unpublished OCI check: %v", err)
+	reference := "oci://registry.example/plugins/example@" + index.Digest
+	output := filepath.Join(root, "evidence.json")
+	if err := run(t.Context(), []string{"check", "--store", store, "--checker", checker, "--artifact", reference, "--oci-layout", layout, "--report", output}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observed []compatibility.Evidence
+	if err = json.Unmarshal(data, &observed); err != nil {
+		t.Fatal(err)
+	}
+	if len(observed) != len(layers) {
+		t.Fatalf("checked %d of %d platform layers: %s", len(observed), len(layers), data)
+	}
+	for i, evidence := range observed {
+		if "sha256:"+evidence.ReleaseSHA256 != index.Digest || "sha256:"+evidence.Report.ArtifactSHA256 != layers[i].Digest || evidence.Report.Outcome != "passed" {
+			t.Fatalf("observation %d does not bind layer %s to root %s: %+v", i, layers[i].Digest, index.Digest, evidence)
+		}
+	}
+	if err = run(t.Context(), []string{"check", "--store", store, "--checker", checker, "--artifact", checker, "--oci-layout", layout}); err == nil || !strings.Contains(err.Error(), "oci://") {
+		t.Fatalf("--oci-layout with a local file: %v", err)
 	}
 }

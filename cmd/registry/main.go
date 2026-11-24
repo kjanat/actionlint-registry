@@ -68,8 +68,8 @@ func run(ctx context.Context, args []string) error {
 		}
 		*evidencePath = filepath.Join(filepath.Dir(candidate), "compatibility")
 	}
-	if *ociLayout != "" && args[0] != "inspect" && args[0] != "candidate" {
-		return errors.New("--oci-layout is available only for inspect and candidate")
+	if *ociLayout != "" && args[0] != "inspect" && args[0] != "candidate" && args[0] != "check" {
+		return errors.New("--oci-layout is available only for inspect, candidate and check")
 	}
 	if args[0] == "inspect" {
 		if *artifactPath == "" {
@@ -132,10 +132,23 @@ func run(ctx context.Context, args []string) error {
 		if *checker == "" || *artifactPath == "" || (*pluginID == "") != (*version == "") {
 			return errors.New("check requires --checker and --artifact; add both --plugin and --version to record evidence for an accepted release")
 		}
-		if *pluginID == "" {
-			if strings.HasPrefix(*artifactPath, "oci://") {
-				return errors.New("an OCI check requires the --plugin and --version of an accepted release")
+		oci := strings.HasPrefix(*artifactPath, "oci://")
+		walk := registry.NewOCIInspector().Walk
+		if *ociLayout != "" {
+			if !oci {
+				return errors.New("check --oci-layout requires an oci:// artifact")
 			}
+			walk = registry.LayoutWalker(*ociLayout)
+		}
+		var observed []compatibility.Evidence
+		if *pluginID == "" && oci {
+			if _, observed, err = registry.CheckOCI(ctx, *checker, walk, *artifactPath, ""); err != nil {
+				return err
+			}
+			if *reportPath != "" {
+				return registry.WriteJSON(*reportPath, observed)
+			}
+		} else if *pluginID == "" {
 			declaration, err := artifact.Inspect(ctx, *artifactPath)
 			if err != nil {
 				return err
@@ -147,15 +160,15 @@ func run(ctx context.Context, args []string) error {
 			if *reportPath != "" {
 				return registry.WriteJSON(*reportPath, evidence)
 			}
-			return json.NewEncoder(os.Stdout).Encode(evidence)
-		}
-		entry, err := registry.Find(index, *pluginID, *version)
-		if err != nil {
-			return err
-		}
-		observed, err := (registry.EvidenceStore{Directory: *evidencePath}).Recheck(ctx, index, *checker, *artifactPath, entry, registry.NewOCIInspector().Walk)
-		if err != nil {
-			return err
+			observed = []compatibility.Evidence{evidence}
+		} else {
+			entry, err := registry.Find(index, *pluginID, *version)
+			if err != nil {
+				return err
+			}
+			if observed, err = (registry.EvidenceStore{Directory: *evidencePath}).Recheck(ctx, index, *checker, *artifactPath, entry, walk); err != nil {
+				return err
+			}
 		}
 		encoder := json.NewEncoder(os.Stdout)
 		for _, evidence := range observed {

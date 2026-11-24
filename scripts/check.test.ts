@@ -323,32 +323,63 @@ test('a passed checker outcome continues to installation', async () => {
 	}
 });
 
-test('an OCI candidate skips the checker', async () => {
-	const directory = await mkdtemp(join(tmpdir(), 'registry-checker-oci-'));
-	try {
-		await writeFile(join(directory, 'host'), 'tested host');
-		await writeFile(join(directory, 'fixture.ts'), 'trusted behavioral fixture');
-		const calls: string[] = [];
-		await assert.rejects(
-			checkCandidate({
-				actionlint: join(directory, 'host'),
-				fixture: join(directory, 'fixture.ts'),
-				registry: join(directory, 'registry'),
-				checker: join(directory, 'checker'),
-				artifact: `oci://ghcr.io/owner/repo/plugin@sha256:${'0'.repeat(64)}`,
-				store: directory,
-				report: join(directory, 'candidate.json'),
-			}, async (_binary, args) => {
-				calls.push(args[0] ?? '');
-				throw new Error('installation started');
-			}),
+const layerReport = (outcome: string, detail = '') =>
+	JSON.stringify({ report: { outcome, detail }, release_sha256: '0'.repeat(64) });
+
+for (
+	const [name, output, rejection] of [
+		[
+			'passes every platform layer',
+			`${layerReport('passed')}\n${layerReport('unsupported', 'future')}\n`,
 			/installation started/,
-		);
-		assert.ok(!calls.includes('check'));
-	} finally {
-		await rm(directory, { recursive: true, force: true });
-	}
-});
+		],
+		[
+			'fails one platform layer',
+			`${layerReport('passed')}\n${layerReport('failed', 'wrong record')}\n`,
+			/Registry checker rejected the candidate: wrong record/,
+		],
+		['produces no layer report', '\n', /Registry checker produced no report/],
+	] as const
+) {
+	test(`an OCI candidate whose checker ${name}`, async () => {
+		const directory = await mkdtemp(join(tmpdir(), 'registry-checker-oci-'));
+		try {
+			await writeFile(join(directory, 'host'), 'tested host');
+			await writeFile(join(directory, 'fixture.ts'), 'trusted behavioral fixture');
+			const reference = `oci://ghcr.io/owner/repo/plugin@sha256:${'0'.repeat(64)}`;
+			const calls: string[][] = [];
+			await assert.rejects(
+				checkCandidate({
+					actionlint: join(directory, 'host'),
+					fixture: join(directory, 'fixture.ts'),
+					registry: join(directory, 'registry'),
+					checker: join(directory, 'checker'),
+					artifact: reference,
+					ociLayout: join(directory, 'layout'),
+					store: directory,
+					report: join(directory, 'candidate.json'),
+				}, async (binary, args) => {
+					calls.push([binary, ...args]);
+					if (args[0] === 'check') return output;
+					throw new Error('installation started');
+				}),
+				rejection,
+			);
+			assert.deepEqual(calls[0], [
+				join(directory, 'registry'),
+				'check',
+				'--checker',
+				join(directory, 'checker'),
+				'--artifact',
+				reference,
+				'--oci-layout',
+				join(directory, 'layout'),
+			]);
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
+}
 
 test('failed delivery preflight removes an old delivery report', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'registry-delivery-report-'));
