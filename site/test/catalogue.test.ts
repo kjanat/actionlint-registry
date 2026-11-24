@@ -1,3 +1,4 @@
+import { Schema } from 'effect';
 import { describe, expect, test } from 'bun:test';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -103,15 +104,18 @@ describe('public registry JSON projection', () => {
 		'rejects a count from a different %s',
 		async field => {
 			const directory = await createExport([fixture('Plugin')]);
-			const snapshot = downloadsSchema.parse(JSON.parse(await readFile(join(directory, 'downloads.json'), 'utf8')));
-			const observation = snapshot.releases[0];
-			if (!observation) throw new Error('Missing fixture observation');
+			const snapshot = Schema.decodeUnknownSync(downloadsSchema)(
+				JSON.parse(await readFile(join(directory, 'downloads.json'), 'utf8')),
+			);
+			const original = snapshot.releases[0];
+			if (!original) throw new Error('Missing fixture observation');
+			const observation = { ...original };
 			if (field === 'provider') observation.provider = 'gitlab';
 			if (field === 'repository_id') observation.repository_id++;
 			if (field === 'version') observation.version = 'other';
 			if (field === 'asset_id') observation.asset_id++;
 			if (field === 'sha256') observation.sha256 = 'f'.repeat(64);
-			await writeFile(join(directory, 'downloads.json'), JSON.stringify(snapshot));
+			await writeFile(join(directory, 'downloads.json'), JSON.stringify({ ...snapshot, releases: [observation] }));
 			expect((await loadCatalogue(directory)).plugins[0]?.downloads).toEqual({ state: 'unavailable' });
 		},
 	);

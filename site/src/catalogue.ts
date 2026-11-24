@@ -1,6 +1,8 @@
+import { Schema } from 'effect';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { catalogueSchema, downloadsSchema, entrySchema, manifestSchema, statusSchema } from '#schema.ts';
+import type { PluginSchemaSource } from '#plugin-config-schemas.ts';
 import type { DownloadSnapshot, Entry, Metric, Plugin, Release, ReleaseStatus, SiteData } from '#schema.ts';
 
 function submissionDigest(entry: Entry): string {
@@ -52,7 +54,7 @@ function totalMetric(releases: Release[]): Metric {
 	return { state: 'available', count: total };
 }
 
-function statusFor(entry: Entry, name: string, statuses: ReleaseStatus[]): ReleaseStatus | undefined {
+function statusFor(entry: Entry, name: string, statuses: readonly ReleaseStatus[]): ReleaseStatus | undefined {
 	return statuses.find(item => item.status === 'revoked' && item.sha256 === submissionDigest(entry))
 		?? statuses.findLast(item =>
 			item.name === name
@@ -60,17 +62,21 @@ function statusFor(entry: Entry, name: string, statuses: ReleaseStatus[]): Relea
 		);
 }
 
-export async function loadCatalogue(directory: string): Promise<SiteData> {
-	const catalogue = catalogueSchema.parse(await readJSON(join(directory, 'index.json')));
-	const statuses = statusSchema.parse(await readJSON(join(directory, catalogue.statuses ?? 'statuses.json')));
+export async function loadCatalogue(
+	directory: string,
+): Promise<SiteData & { configurationSources: PluginSchemaSource[] }> {
+	const catalogue = Schema.decodeUnknownSync(catalogueSchema)(await readJSON(join(directory, 'index.json')));
+	const statuses = Schema.decodeUnknownSync(statusSchema)(
+		await readJSON(join(directory, catalogue.statuses ?? 'statuses.json')),
+	);
 	let downloads: DownloadSnapshot | null = null;
 	try {
-		downloads = downloadsSchema.parse(await readJSON(join(directory, 'downloads.json')));
+		downloads = Schema.decodeUnknownSync(downloadsSchema)(await readJSON(join(directory, 'downloads.json')));
 	} catch (error) {
 		if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
 	}
-	const plugins = await Promise.all(catalogue.plugins.map(async item => {
-		const manifest = manifestSchema.parse(await readJSON(join(directory, item.manifest)));
+	const items = await Promise.all(catalogue.plugins.map(async item => {
+		const manifest = Schema.decodeUnknownSync(manifestSchema)(await readJSON(join(directory, item.manifest)));
 		const repository = `${manifest.plugin.provider}.com/${manifest.plugin.repository}`;
 		let selector = repository;
 		if (manifest.plugin.schema_version === 2) {
@@ -95,7 +101,7 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 		const reference = item.aliases.toSorted()[0] ?? item.name;
 		const entries = await Promise.all(manifest.versions.map(async version => {
 			const record = join(dirname(item.manifest), version.record).replaceAll('\\', '/');
-			const entry = entrySchema.parse(await readJSON(join(directory, record)));
+			const entry = Schema.decodeUnknownSync(entrySchema)(await readJSON(join(directory, record)));
 			if (
 				entry.submission.tag !== version.version
 				|| `${entry.submission.provider}.com/${entry.submission.repository}` !== repository
@@ -146,7 +152,14 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 			downloads: totalMetric(releases),
 			releases,
 		};
-		return plugin;
+		return {
+			plugin,
+			configuration: { name: item.name, description: plugin.description, versions: entries },
+		};
 	}));
-	return { plugins, observedAt: downloads?.observed_at ?? null };
+	return {
+		plugins: items.map(item => item.plugin),
+		configurationSources: items.map(item => item.configuration),
+		observedAt: downloads?.observed_at ?? null,
+	};
 }

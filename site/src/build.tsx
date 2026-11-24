@@ -7,6 +7,7 @@ import { loadCatalogue } from '#catalogue.ts';
 import { Home, PluginPage } from '#components.tsx';
 import { pageSize, staticPath } from '#directory.ts';
 import type { Sort } from '#directory.ts';
+import { writePluginConfigSchemas } from '#plugin-config-schemas.ts';
 
 export async function buildSite(input: string, output: string): Promise<number> {
 	const data = await loadCatalogue(resolve(input));
@@ -26,6 +27,7 @@ export async function buildSite(input: string, output: string): Promise<number> 
 		}
 		await copyJSON(resolve(input), destination);
 	}
+	await writePluginConfigSchemas(destination, data.configurationSources);
 	const source = fileURLToPath(new URL('.', import.meta.url));
 	const assets = join(resolve(output), 'assets');
 	await mkdir(assets, { recursive: true });

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { Schema } from 'effect';
 import { mkdir, readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { chromium } from 'playwright';
@@ -163,7 +164,7 @@ test('static fallback, browser directory and locale behavior against 100 public 
 			page.getByRole('link', { name: /^Publication record/ }).click(),
 		]);
 		if (!recordResponse) throw new Error('No publication JSON response');
-		expect(entrySchema.parse(await recordResponse.json()).submission.tag).toBe('v1.0.0');
+		expect(Schema.decodeUnknownSync(entrySchema)(await recordResponse.json()).submission.tag).toBe('v1.0.0');
 		for (const target of ['JSON index', 'Release statuses', 'Download counts JSON']) {
 			await page.goto(base);
 			if (target !== 'JSON index') await page.locator('.help summary').click();
@@ -173,9 +174,13 @@ test('static fallback, browser directory and locale behavior against 100 public 
 			]);
 			if (!response) throw new Error(`No response for ${target}`);
 			const payload: unknown = await response.json();
-			if (target === 'JSON index') expect(catalogueSchema.parse(payload).plugins).toHaveLength(100);
-			if (target === 'Release statuses') expect(statusSchema.parse(payload).releases).toHaveLength(0);
-			if (target === 'Download counts JSON') expect(downloadsSchema.parse(payload).releases).toHaveLength(100);
+			if (target === 'JSON index') expect(Schema.decodeUnknownSync(catalogueSchema)(payload).plugins).toHaveLength(100);
+			if (target === 'Release statuses') {
+				expect(Schema.decodeUnknownSync(statusSchema)(payload).releases).toHaveLength(0);
+			}
+			if (target === 'Download counts JSON') {
+				expect(Schema.decodeUnknownSync(downloadsSchema)(payload).releases).toHaveLength(100);
+			}
 		}
 		await context.close();
 

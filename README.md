@@ -269,6 +269,14 @@ configuration records the exact version and local candidates also bind a digest.
 Verified registry selections and artifact bytes live in the user cache. Disable a
 conflicting tool when replacing it, for example `--no-tool=shellcheck`.
 
+### Plugin configuration schemas
+
+The [plugin configuration catalog](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.catalog.json)
+lists plugin selectors and maps each release tag in `versions` to its JSON Schema.
+Use the release schema to validate that plugin's declared settings in an actionlint
+configuration. `url` points to the newest active release with a schema, or the
+newest release with a schema if none are active.
+
 ### Registry schema
 
 Download the [registry schema bundle](https://plugins.actionlint.kjanat.dev/schemas/registry.schema.json)
