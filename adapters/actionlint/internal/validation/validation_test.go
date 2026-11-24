@@ -9,11 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"actionlint.kjanat.dev/v2/internal/checking"
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
-	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
-	sourcepos "actionlint.kjanat.dev/v2/internal/input/source"
-	componenthost "actionlint.kjanat.dev/v2/internal/plugins/execution/component"
+	"actionlint.kjanat.dev/v2/internal/base/sourcetext"
+	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
+	"actionlint.kjanat.dev/v2/internal/model/rule"
+	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
 	results "actionlint.kjanat.dev/v2/internal/results"
 )
 
@@ -28,12 +27,12 @@ func TestCompatibleComponent(t *testing.T) {
 }
 
 func TestComponentFindingUsesWorkflowCoordinates(t *testing.T) {
-	component, err := componenthost.Load(t.Context(), hostFixture(t, "component-no-sudo"), componenthost.Options{Timeout: callTimeout, MemoryPages: 1024, ReservedRules: checking.BuiltinRuleNames()})
+	plugin, err := loadComponent(t.Context(), hostFixture(t, "component-no-sudo"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := component.Close(context.Background()); err != nil {
+		if err := plugin.Close(context.Background()); err != nil {
 			t.Error(err)
 		}
 	})
@@ -41,11 +40,11 @@ func TestComponentFindingUsesWorkflowCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings, err := component.CheckDocument(t.Context(), input)
+	findings, err := plugin.AnalyzeDocument(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 1 || findings[0].Start != (sourcepos.Position{Line: 10, Column: 11}) {
+	if len(findings) != 1 || findings[0].Start != (sourcetext.Position{Line: 10, Column: 11}) {
 		t.Fatalf("expected mapped sudo diagnostic: %+v", findings)
 	}
 	if err := componentFindings(findings, input, []string{"no-sudo"}); err != nil {
@@ -162,7 +161,7 @@ func (candidate *managedAnalyzer) NegotiateTool(context.Context, json.RawMessage
 	return &checkinputs.ToolNegotiation{Options: json.RawMessage(`{}`)}, nil
 }
 
-func (candidate *managedAnalyzer) CheckDocument(_ context.Context, input checkinputs.Input) ([]results.Diagnostic, error) {
+func (candidate *managedAnalyzer) AnalyzeDocument(_ context.Context, input checkinputs.AnalyzerInput) ([]results.Diagnostic, error) {
 	candidate.called = len(input.Scripts) != 0 && input.BuildShellScriptInput != nil
 	return nil, nil
 }
@@ -188,7 +187,7 @@ func (candidate *optionsAnalyzer) Descriptor() checkinputs.Descriptor {
 	return checkinputs.Descriptor{Name: "registry-options-test", Description: "Exercise option registration", Category: "correctness", OptionsSchema: candidate.schema}
 }
 
-func (candidate *optionsAnalyzer) CheckDocument(context.Context, checkinputs.Input) ([]results.Diagnostic, error) {
+func (candidate *optionsAnalyzer) AnalyzeDocument(context.Context, checkinputs.AnalyzerInput) ([]results.Diagnostic, error) {
 	candidate.called = true
 	return nil, nil
 }
@@ -219,21 +218,21 @@ func TestDescriptorBounds(t *testing.T) {
 }
 
 func TestDiagnosticBounds(t *testing.T) {
-	request := checkinputs.ScriptRequest{Source: "é\n", Filename: "test.py"}
-	valid := checkinputs.ScriptDiagnostic{Filename: request.Filename, Code: "X", Message: "example", Location: checkinputs.ScriptPosition{Row: 1, Column: 1}, EndLocation: checkinputs.ScriptPosition{Row: 1, Column: 2}}
-	if err := scriptFindings([]checkinputs.ScriptDiagnostic{valid}, request); err != nil {
+	request := scriptengine.Request{Source: "é\n", Filename: "test.py"}
+	valid := scriptengine.Diagnostic{Filename: request.Filename, Code: "X", Message: "example", Location: sourcetext.Position{Line: 1, Column: 1}, EndLocation: sourcetext.Position{Line: 1, Column: 2}}
+	if err := scriptFindings([]scriptengine.Diagnostic{valid}, request); err != nil {
 		t.Fatal(err)
 	}
 	invalid := valid
 	invalid.EndLocation.Column = 3 // Byte offsets are not Unicode scalar offsets.
-	if err := scriptFindings([]checkinputs.ScriptDiagnostic{invalid}, request); err == nil {
+	if err := scriptFindings([]scriptengine.Diagnostic{invalid}, request); err == nil {
 		t.Fatal("accepted out-of-bounds location")
 	}
 	input, err := workflowInput(t.Context(), sampleWorkflow)
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := results.Diagnostic{Rule: "test", Message: "example", Start: sourcepos.Position{Line: 1, Column: 1}, End: sourcepos.Position{Line: 1, Column: 2}}
+	d := results.Diagnostic{Rule: "test", Message: "example", Start: sourcetext.Position{Line: 1, Column: 1}, End: sourcetext.Position{Line: 1, Column: 2}}
 	if err := componentFindings([]results.Diagnostic{d}, input, []string{"test"}); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +247,7 @@ func TestSharedFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(input.Scripts) != 1 || input.Reference.Revision == "" || len(input.Scripts[0].Spans) == 0 || input.Scripts[0].Runtime == nil || !input.Scripts[0].Runtime.ShellKnown {
+	if len(input.Scripts) != 1 || input.Reference.Revision == "" || len(input.Scripts[0].Spans) == 0 || input.Scripts[0].Runtime == nil || !input.Scripts[0].Runtime.Shell.Known() {
 		t.Fatalf("missing authentic workflow facts: %+v", input)
 	}
 }

@@ -1,7 +1,7 @@
 package validation
 
 import (
-	runner "actionlint.kjanat.dev/v2/internal/model/runners/contract"
+	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
 	"errors"
 	"slices"
 	"strings"
@@ -73,7 +73,7 @@ func TestRunnerDeclarationMustMatchRuntime(t *testing.T) {
 
 func TestRunnerTargetOrderDoesNotChangeSupportedPlatforms(t *testing.T) {
 	declared := runnerDeclaration{Name: "provider", Version: "1", Targets: []string{"buildkite", "github"}}
-	actual := runner.Descriptor{Name: "provider", Version: "1", Targets: []string{"github", "buildkite"}}
+	actual := runnerapi.Descriptor{Name: "provider", Version: "1", Targets: []string{"github", "buildkite"}}
 	if err := declared.matches(actual); err != nil {
 		t.Fatal(err)
 	}

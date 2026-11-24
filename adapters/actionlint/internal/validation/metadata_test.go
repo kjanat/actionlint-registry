@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
-	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
+	"actionlint.kjanat.dev/v2/internal/model/rule"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
 )
 
@@ -162,7 +162,7 @@ func TestEmptyRequiredInputsAreEquivalent(t *testing.T) {
 }
 
 func TestUnknownContractCheckedBeforeHostSpecificFields(t *testing.T) {
-	for _, info := range []pluginartifact.Info{
+	for _, info := range []pluginartifact.ArtifactProvenance{
 		{Kind: pluginartifact.Component, Metadata: []byte(`{"transport":"wasm-component","interface":"example:future/analyzer@2.0.0","wit_sha256":"future","abi_version":{"unrelated":"extension"},"descriptor":{"requires":{"new":"shape"}}}`)},
 		{Kind: pluginartifact.Core, Metadata: []byte(`{"transport":"wasm-core-json","abi_version":999,"interface":{"unrelated":"extension"},"interfaces":{"check":"new-shape"}}`)},
 	} {

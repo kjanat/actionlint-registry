@@ -15,10 +15,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
-	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	"actionlint.kjanat.dev/v2/internal/model/rule"
+	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
-	corewasm "actionlint.kjanat.dev/v2/internal/plugins/execution/module"
+	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/module"
 )
 
 const callTimeout = 10 * time.Second
@@ -94,7 +94,7 @@ func Validate(ctx context.Context, path string) (Result, error) {
 }
 
 func validateCore(ctx context.Context, path string) (result Result, err error) {
-	engine, err := corewasm.Load(ctx, path, corewasm.Options{Timeout: callTimeout, MemoryPages: 4096})
+	engine, err := module.LoadModuleEngine(ctx, path, module.Options{Timeout: callTimeout, MemoryPages: 4096})
 	if err != nil {
 		return result, err
 	}
@@ -133,7 +133,7 @@ func validateCore(ctx context.Context, path string) (result Result, err error) {
 	if err := engine.ValidateConfig(ctx, nil); err != nil {
 		return result, fmt.Errorf("default configuration: %w", err)
 	}
-	request := checkinputs.ScriptRequest{Source: "\n", Filename: "registry-smoke.txt"}
+	request := scriptengine.Request{Source: "\n", Filename: "registry-smoke.txt"}
 	if slices.Contains(metadata.Capabilities.ScriptShells, "python") || metadata.Engine.Name == "ruff" {
 		request.Source, request.Filename = "print(missing)\n", "registry-smoke.py"
 	}
@@ -145,7 +145,7 @@ func validateCore(ctx context.Context, path string) (result Result, err error) {
 		if err := scriptFindings(findings, request); err != nil {
 			return result, err
 		}
-		if metadata.Engine.Name == "ruff" && !slices.ContainsFunc(findings, func(d checkinputs.ScriptDiagnostic) bool { return d.Code == "F821" }) {
+		if metadata.Engine.Name == "ruff" && !slices.ContainsFunc(findings, func(d scriptengine.Diagnostic) bool { return d.Code == "F821" }) {
 			return result, errors.New("ruff smoke sample did not report F821")
 		}
 	}

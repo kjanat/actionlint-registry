@@ -13,16 +13,16 @@ import (
 )
 
 var hostFixtures = map[string]string{
-	"core-echo":                       "internal/plugins/execution/module/testdata/engines/echo.wasm",
-	"core-missing-export":             "internal/plugins/execution/module/testdata/wat/missing-export.wasm",
-	"component-no-sudo":               "internal/plugins/execution/component/testdata/plugins/no-sudo.wasm",
-	"component-script":                "internal/plugins/execution/component/testdata/plugins/script-engine.wasm",
-	"component-runners":               "internal/plugins/execution/component/testdata/plugins/buildkite-runners.wasm",
-	"component-script-0.3.0":          "internal/plugins/execution/component/testdata/plugins/script-engine-0.3.0.wasm",
-	"component-template-script-0.3.0": "internal/plugins/execution/component/testdata/plugins/template-script-engine-0.3.0.wasm",
-	"component-wrong-enum":            "internal/plugins/execution/component/testdata/contracts/wrong-enum.wasm",
-	"component-wrong-record":          "internal/plugins/execution/component/testdata/contracts/wrong-record.wasm",
-	"component-wrong-signature":       "internal/plugins/execution/component/testdata/contracts/wrong-signature.wasm",
+	"core-echo":                       "internal/plugins/pluginexecution/module/testdata/engines/echo.wasm",
+	"core-missing-export":             "internal/plugins/pluginexecution/module/testdata/wat/missing-export.wasm",
+	"component-no-sudo":               "internal/plugins/pluginexecution/component/testdata/plugins/no-sudo.wasm",
+	"component-script":                "internal/plugins/pluginexecution/component/testdata/plugins/script-engine.wasm",
+	"component-runners":               "internal/plugins/pluginexecution/component/testdata/plugins/buildkite-runners.wasm",
+	"component-script-0.3.0":          "internal/plugins/pluginexecution/component/testdata/plugins/script-engine-0.3.0.wasm",
+	"component-template-script-0.3.0": "internal/plugins/pluginexecution/component/testdata/plugins/template-script-engine-0.3.0.wasm",
+	"component-wrong-enum":            "internal/plugins/pluginexecution/component/testdata/contracts/wrong-enum.wasm",
+	"component-wrong-record":          "internal/plugins/pluginexecution/component/testdata/contracts/wrong-record.wasm",
+	"component-wrong-signature":       "internal/plugins/pluginexecution/component/testdata/contracts/wrong-signature.wasm",
 }
 
 var hostDirectory = sync.OnceValues(func() (string, error) {

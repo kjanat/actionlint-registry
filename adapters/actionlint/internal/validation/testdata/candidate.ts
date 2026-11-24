@@ -36,13 +36,15 @@ function object(value: unknown): Record<string, unknown> {
 
 export async function verify({ directory, run }: Context): Promise<{ checks: string[]; probe: string[] }> {
 	const probe = ['check', '--json', 'workflow.yml'];
-	const result = object(JSON.parse(await run(probe, 1)));
+	const result = object(JSON.parse(await run(probe)));
 	assert.equal(result.completed, true);
-	assert.equal(result.exit_code, 1);
+	assert.equal(result.exit_code, 0);
+	assert.equal(result.failure_threshold, 'error');
 	assert.ok(Array.isArray(result.diagnostics));
 	assert.equal(result.diagnostics.length, 1);
 	const finding = object(result.diagnostics[0]);
 	assert.equal(finding.rule, 'no-sudo');
+	assert.equal(finding.severity, 'warning');
 	assert.deepEqual(finding.start, { line: 11, column: 11 });
 	await writeFile(join(directory, 'workflow.yml'), workflow.replace('sudo ', ''));
 	try {
@@ -73,7 +75,7 @@ function hostFixture(): string {
 		encoding: 'utf8',
 	})));
 	assert.ok(typeof download.Dir === 'string' && download.Dir !== '', 'go mod download returned no module directory');
-	return join(download.Dir, 'internal/plugins/execution/component/testdata/plugins/no-sudo.wasm');
+	return join(download.Dir, 'internal/plugins/pluginexecution/component/testdata/plugins/no-sudo.wasm');
 }
 
 function withoutDiscovery(module: Buffer): Buffer {

@@ -13,11 +13,11 @@ import (
 	"slices"
 	"strings"
 
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
+	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
 
-	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
-	runner "actionlint.kjanat.dev/v2/internal/model/runners/contract"
+	"actionlint.kjanat.dev/v2/internal/model/rule"
+	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
 )
 
 // ErrUnsupportedContract identifies a contract version this checker does not implement.
@@ -48,7 +48,7 @@ type runnerDeclaration struct {
 	Targets []string `json:"targets"`
 }
 
-func (declared runnerDeclaration) matches(actual runner.Descriptor) error {
+func (declared runnerDeclaration) matches(actual runnerapi.Descriptor) error {
 	declaredTargets := slices.Sorted(slices.Values(declared.Targets))
 	actualTargets := slices.Sorted(slices.Values(actual.Targets))
 	if declared.Name != actual.Name || declared.Version != actual.Version || !slices.Equal(declaredTargets, actualTargets) {
@@ -91,7 +91,7 @@ type embeddedMetadata struct {
 	Descriptor   json.RawMessage `json:"descriptor"`
 }
 
-func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMetadata, error) {
+func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance) (embeddedMetadata, error) {
 	var metadata embeddedMetadata
 	if len(info.Metadata) == 0 {
 		return metadata, errors.New("registry admission requires a top-level actionlint.plugin custom section")
