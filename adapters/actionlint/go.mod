@@ -7,7 +7,7 @@ toolchain go1.27.4
 tool actionlint.kjanat.dev/v2/cmd/actionlint
 
 require (
-	actionlint.kjanat.dev/v2 v2.0.0-20261124003259-fdc8ecc800d4
+	actionlint.kjanat.dev/v2 v2.0.0-20261124082107-101dfc9baebf
 	golang.org/x/mod v0.43.0
 )
 
@@ -20,7 +20,7 @@ require (
 	github.com/itchyny/gojq v0.12.19 // indirect
 	github.com/itchyny/timefmt-go v0.1.8 // indirect
 	github.com/kjanat/go-yaml/v4 v4.0.0-rc.7 // indirect
-	github.com/kjanat/wacogo v0.3.4 // indirect
+	github.com/kjanat/wacogo v0.3.8 // indirect
 	github.com/kjanat/wazero v1.12.2 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

@@ -2,7 +2,6 @@ package validation
 
 import (
 	"context"
-	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -11,6 +10,7 @@ import (
 
 	"actionlint.kjanat.dev/v2/internal/base/sourcetext"
 	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
+	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
 )
 
 const scriptMetadata = `{"metadata_version":1,"transport":"wasm-component","id":"echo-component","name":"Echo component","description":"Registry script fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/script-engine@0.2.0","wit_sha256":"c20d7e9e516166576fdf19bfd86e0843838179b12ad55350c33db8d04c2eaa9b","engine":{"name":"echo","version":"1.0.0"},"capabilities":{"script_shells":["python"]},"config_schema":{"type":"object"},"rules":[{"name":"echo","description":"Find a missing value","category":"correctness","subcategory":"python","maturity":"stable","provider":"echo-component","recommended":true,"documentation_url":"https://example.com/echo","options_schema":{"type":"object"},"fix_availability":"none"}]}`
@@ -98,7 +98,7 @@ func TestScriptComponent03(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.PluginID != test.id || !slices.Contains(result.Checks, "repeated-sample") || !strings.HasPrefix(result.Contract, scriptInterface03+"#") {
+			if result.PluginID != test.id || !slices.Contains(result.Checks, "repeated-sample") || !strings.HasPrefix(result.Contract, component.ScriptEngine03Interface+"#") {
 				t.Fatalf("wrong 0.3 role evidence: %+v", result)
 			}
 		})
@@ -106,7 +106,7 @@ func TestScriptComponent03(t *testing.T) {
 }
 
 func TestScriptComponent03RejectsMismatchedDeclaration(t *testing.T) {
-	metadata := strings.Replace(templateMetadata03, scriptInterface03, scriptInterface, 1)
+	metadata := strings.Replace(templateMetadata03, component.ScriptEngine03Interface, component.ScriptEngineInterface, 1)
 	_, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-template-script-0.3.0", metadata))
 	if err == nil || errors.Is(err, ErrUnsupportedContract) {
 		t.Fatalf("expected a supported contract with a mismatched runtime declaration to fail, got %v", err)
@@ -124,7 +124,7 @@ func TestRunnerProvider03(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.PluginID != "runner-support-fixture" || result.RunnerAsOf != testAsOf.String() || result.Contract != runnerInterface03+"#sha256="+runner03ContractDigest {
+	if result.PluginID != "runner-support-fixture" || result.RunnerAsOf != testAsOf.String() || result.Contract != component.Runner03Interface+"#sha256="+runner03ContractDigest {
 		t.Fatalf("wrong 0.3 runner evidence: %+v", result)
 	}
 }
@@ -154,7 +154,7 @@ func answerWith(resolution runnerapi.Resolution) func(runnerapi.Request) []runne
 	}
 }
 
-func admitFakeRunner(t *testing.T, runner fakeRunner) (Result, error) {
+func admitFakeRunner(t *testing.T, runner fakeRunner) (roleEvidence, error) {
 	t.Helper()
 	if runner.descriptor.Name == "" {
 		runner.descriptor = runnerapi.Descriptor{Name: "buildkite-runners", Version: "0.1.0", Targets: []string{"buildkite"}}
@@ -162,11 +162,8 @@ func admitFakeRunner(t *testing.T, runner fakeRunner) (Result, error) {
 	if runner.answer == nil {
 		runner.answer = answerWith(runnerapi.Unknown{Reason: "registry fixture"})
 	}
-	declaration, err := jsonv2.Marshal(runnerDeclaration{Name: runner.descriptor.Name, Version: runner.descriptor.Version, Targets: runner.descriptor.Targets})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return checkRunnerProvider(t.Context(), runnerapi.Registration{Provider: runner, ImplementationID: "registry-fake"}, embeddedMetadata{ID: "fake", Descriptor: declaration}, testAsOf)
+	declared := runnerDeclaration{Name: runner.descriptor.Name, Version: runner.descriptor.Version, Targets: runner.descriptor.Targets}
+	return checkRunnerProvider(t.Context(), runnerapi.Registration{Provider: runner, ImplementationID: "registry-fake"}, &declared, testAsOf)
 }
 
 func TestRunnerAnswersFollowHostResolution(t *testing.T) {
@@ -177,12 +174,8 @@ func TestRunnerAnswersFollowHostResolution(t *testing.T) {
 		"label-rejection":    answerWith(runnerapi.NoMatch{Rejections: []runnerapi.Rejection{label}}),
 		"unplaced-rejection": answerWith(runnerapi.NoMatch{Rejections: []runnerapi.Rejection{{Reason: "no queue"}}}),
 	} {
-		result, err := admitFakeRunner(t, fakeRunner{answer: answer})
-		if err != nil {
+		if _, err := admitFakeRunner(t, fakeRunner{answer: answer}); err != nil {
 			t.Fatalf("%s answer rejected: %v", name, err)
-		}
-		if result.RunnerAsOf != testAsOf.String() {
-			t.Fatalf("%s: admission did not record its assessment date: %+v", name, result)
 		}
 	}
 	scoped := func(change func(*runnerapi.Answer)) func(runnerapi.Request) []runnerapi.Answer {

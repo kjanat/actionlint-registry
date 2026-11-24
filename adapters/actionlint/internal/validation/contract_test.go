@@ -2,8 +2,12 @@ package validation
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+
+	"actionlint.kjanat.dev/v2/internal/development/tests/testutil/wasmcomponent"
+	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
 )
 
 const componentContractDigest = "287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23"
@@ -19,7 +23,7 @@ func TestAnalyzerCompatibilityUsesExportedTypes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Contract != componentInterface+"#sha256="+digest {
+		if result.Contract != component.AnalyzerInterface+"#sha256="+digest {
 			t.Fatalf("changed declared source identity: %s", result.Contract)
 		}
 		_, err = Validate(t.Context(), testAsOf, packagedFixture(t, "component-wrong-record", metadata))
@@ -36,14 +40,66 @@ func TestAnalyzerCompatibilityUsesExportedTypes(t *testing.T) {
 }
 
 func TestComponentInterfaceVersions(t *testing.T) {
-	for _, role := range []string{"analyzer", "script-engine", "runner-provider"} {
-		current := "kjanat:actionlint/" + role + "@0.2.0"
-		if !supportedComponent(current) {
+	for _, current := range []string{component.AnalyzerInterface, component.ScriptEngineInterface, component.ScriptEngine03Interface, component.RunnerInterface, component.Runner03Interface, component.ReferenceResolverInterface} {
+		if !hostSupports(t.Context(), current) {
 			t.Fatalf("current interface %q is unsupported", current)
 		}
-		old := "kjanat:actionlint/" + role + "@0.1.0"
-		if supportedComponent(old) {
-			t.Fatalf("old interface %q is supported", old)
+	}
+	for _, other := range []string{"kjanat:actionlint/analyzer@0.1.0", "kjanat:actionlint/script-engine@0.1.0", "kjanat:actionlint/runner-provider@0.4.0", "example:future/analyzer@2.0.0"} {
+		if hostSupports(t.Context(), other) {
+			t.Fatalf("interface %q is supported", other)
 		}
+	}
+}
+
+func interfaceMetadata(iface string) string {
+	return strings.Replace(componentMetadata, `"interface":"`+component.AnalyzerInterface+`"`, `"interface":"`+iface+`"`, 1)
+}
+
+func TestDeclaredInterfaceMustMatchExports(t *testing.T) {
+	for _, declared := range []string{"kjanat:actionlint/analyzer@0.1.0", "kjanat:actionlint/analyzer@0.3.0", component.Runner03Interface} {
+		_, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", interfaceMetadata(declared)))
+		if err == nil || errors.Is(err, ErrUnsupportedContract) || !strings.Contains(err.Error(), declared) {
+			t.Fatalf("%s declared on an analyzer@0.2.0 export: want a failed check, got %v", declared, err)
+		}
+	}
+	older := "kjanat:actionlint/analyzer@0.1.0"
+	built := wasmcomponent.Build(nil, []string{older}, nil)
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, built, interfaceMetadata(older))); !errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("an exported interface this host does not load must be unsupported, got %v", err)
+	}
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, built, componentMetadata)); err == nil || errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("a current declaration over an older export must fail, got %v", err)
+	}
+}
+
+func TestOpenReadsComponentInterfaces(t *testing.T) {
+	opened, err := Open(t.Context(), packagedFixture(t, "component-no-sudo", componentMetadata))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Interfaces == nil || !slices.Equal(opened.Interfaces.Exports, []string{component.AnalyzerInterface}) || !slices.Contains(opened.Interfaces.Imports, component.InvocationContextInterface) {
+		t.Fatalf("component interfaces = %+v", opened.Interfaces)
+	}
+	core, err := Open(t.Context(), coreFixture(t, coreMetadata))
+	if err != nil || core.Interfaces != nil {
+		t.Fatalf("core module interfaces = %+v, %v", core.Interfaces, err)
+	}
+	invalid := append(unpackagedFixture(t, "component-no-sudo"), 0xff)
+	if _, err := Open(t.Context(), appendFixtureMetadata(t, invalid, componentMetadata)); err == nil || errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("opened a component the host cannot parse: %v", err)
+	}
+}
+
+const resolverMetadata = `{"metadata_version":1,"transport":"wasm-component","id":"commitish","name":"Commitish","description":"Registry resolver fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"` + component.ReferenceResolverInterface + `","wit_sha256":"` + componentContractDigest + `"}`
+
+func TestReferenceResolverComponent(t *testing.T) {
+	path := appendFixtureMetadata(t, component.BuiltinCommitishArtifact().Bytes, resolverMetadata)
+	result, err := Validate(t.Context(), testAsOf, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PluginID != "commitish" || len(result.Rules) != 0 || !slices.Contains(result.Checks, "reference-resolver") || result.Contract != component.ReferenceResolverInterface+"#sha256="+componentContractDigest {
+		t.Fatalf("wrong resolver evidence: %+v", result)
 	}
 }

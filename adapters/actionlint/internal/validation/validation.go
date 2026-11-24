@@ -19,6 +19,7 @@ import (
 	"actionlint.kjanat.dev/v2/internal/model/rule"
 	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
+	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
 	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/module"
 )
 
@@ -38,48 +39,75 @@ type Result struct {
 	RunnerAsOf    string          `json:"runner_as_of,omitempty"`
 }
 
-// Validate accepts only a snapshot stored in a local regular file. The caller must
-// verify its checksum before calling Validate and keep the file unchanged until it returns.
-func Validate(ctx context.Context, runnerAsOf lifecycle.Date, path string) (Result, error) {
-	if runnerAsOf.IsZero() {
-		return Result{}, errors.New("validation requires a runner assessment date")
-	}
+type Artifact struct {
+	path       string
+	resolved   *pluginartifact.Artifact
+	Interfaces *component.Interfaces
+}
+
+// Open accepts only a snapshot stored in a local regular file. The caller must
+// verify its checksum before calling Open and keep the file unchanged until
+// validation returns.
+func Open(ctx context.Context, path string) (Artifact, error) {
 	if strings.Contains(path, "://") {
-		return Result{}, errors.New("validation requires a local snapshot")
+		return Artifact{}, errors.New("validation requires a local snapshot")
 	}
 	path, err := filepath.Abs(path)
 	if err != nil {
-		return Result{}, err
+		return Artifact{}, err
 	}
 	stat, err := os.Lstat(path)
 	if err != nil {
-		return Result{}, err
+		return Artifact{}, err
 	}
 	if !stat.Mode().IsRegular() {
-		return Result{}, errors.New("snapshot must be a regular file")
+		return Artifact{}, errors.New("snapshot must be a regular file")
 	}
 	process, err := isProcessManifest(path)
 	if err != nil {
-		return Result{}, err
+		return Artifact{}, err
 	}
 	if process {
-		return Result{}, fmt.Errorf("%w: process/1 requires a process-aware checker; this checker exercises WASM contracts only", ErrUnsupportedContract)
+		return Artifact{}, fmt.Errorf("%w: process/1 requires a process-aware checker; this checker exercises WASM contracts only", ErrUnsupportedContract)
 	}
-	artifact, err := pluginartifact.Resolve(ctx, path, pluginartifact.Options{MaxBytes: 128 << 20})
+	resolved, err := pluginartifact.Resolve(ctx, path, pluginartifact.Options{MaxBytes: 128 << 20})
+	if err != nil {
+		return Artifact{}, err
+	}
+	opened := Artifact{path: path, resolved: resolved}
+	if resolved.Info.Kind == pluginartifact.Component {
+		interfaces, err := component.ReadInterfaces(resolved.Bytes)
+		if err != nil {
+			return Artifact{}, err
+		}
+		opened.Interfaces = &interfaces
+	}
+	return opened, nil
+}
+
+func Validate(ctx context.Context, runnerAsOf lifecycle.Date, path string) (Result, error) {
+	opened, err := Open(ctx, path)
 	if err != nil {
 		return Result{}, err
 	}
-	info := artifact.Info
-	manifest, err := inspectMetadata(ctx, info)
+	return opened.Validate(ctx, runnerAsOf)
+}
+
+func (opened Artifact) Validate(ctx context.Context, runnerAsOf lifecycle.Date) (Result, error) {
+	if runnerAsOf.IsZero() {
+		return Result{}, errors.New("validation requires a runner assessment date")
+	}
+	info := opened.resolved.Info
+	manifest, err := inspectMetadata(ctx, info, opened.Interfaces)
 	if err != nil {
 		return Result{}, err
 	}
 	var result Result
 	switch info.Kind {
 	case pluginartifact.Core:
-		result, err = validateCore(ctx, path)
+		result, err = validateCore(ctx, opened.path)
 	case pluginartifact.Component:
-		result, err = validateComponent(ctx, path, manifest, runnerAsOf)
+		result, err = validateComponent(ctx, opened.resolved, manifest, runnerAsOf)
 	default:
 		return Result{}, errors.New("unsupported artifact kind")
 	}

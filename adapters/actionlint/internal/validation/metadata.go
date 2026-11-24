@@ -24,19 +24,9 @@ import (
 // ErrUnsupportedContract identifies a contract version this checker does not implement.
 var ErrUnsupportedContract = errors.New("contract is not supported by this checker")
 
-const componentInterface = component.AnalyzerInterface
-const scriptInterface = component.ScriptEngineInterface
-const scriptInterface03 = component.ScriptEngine03Interface
-const runnerInterface = component.RunnerInterface
-const runnerInterface03 = component.Runner03Interface
-
-func supportedComponent(iface string) bool {
-	switch iface {
-	case componentInterface, scriptInterface, scriptInterface03, runnerInterface, runnerInterface03:
-		return true
-	default:
-		return false
-	}
+func hostSupports(ctx context.Context, iface string) bool {
+	_, err := component.Admit(ctx, component.ListedInterfaces{Interfaces: component.Interfaces{Exports: []string{iface}}})
+	return err == nil
 }
 
 // componentDeclaration compares embedded metadata with the host's rule declaration.
@@ -93,7 +83,7 @@ type embeddedMetadata struct {
 	Descriptor   json.RawMessage `json:"descriptor"`
 }
 
-func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance) (embeddedMetadata, error) {
+func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance, interfaces *component.Interfaces) (embeddedMetadata, error) {
 	var metadata embeddedMetadata
 	if len(info.Metadata) == 0 {
 		return metadata, errors.New("registry admission requires a top-level actionlint.plugin custom section")
@@ -121,8 +111,14 @@ func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance
 		if err := jsonv2.Unmarshal(info.Metadata, &contract); err != nil {
 			return metadata, fmt.Errorf("component contract declaration: %w", err)
 		}
-		if contract.Transport != "wasm-component" || !supportedComponent(contract.Interface) {
+		if contract.Transport != "wasm-component" {
 			return metadata, ErrUnsupportedContract
+		}
+		if interfaces == nil || !slices.Contains(interfaces.Exports, contract.Interface) {
+			return metadata, fmt.Errorf("plugin metadata declares %s; the component does not export it", contract.Interface)
+		}
+		if !hostSupports(ctx, contract.Interface) {
+			return metadata, fmt.Errorf("%w: this host does not load %s", ErrUnsupportedContract, contract.Interface)
 		}
 		// Source hashes change with WIT comments. The host checks actual types;
 		// the declaration's digest identifies the publisher's source contract.
@@ -172,16 +168,6 @@ func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance
 			}
 		}
 	case pluginartifact.Component:
-		switch metadata.Interface {
-		case componentInterface:
-			if _, err := decodeDescriptor[componentDeclaration](metadata.Descriptor); err != nil {
-				return metadata, err
-			}
-		case runnerInterface, runnerInterface03:
-			if _, err := decodeDescriptor[runnerDeclaration](metadata.Descriptor); err != nil {
-				return metadata, err
-			}
-		}
 	default:
 		return metadata, errors.New("unsupported artifact kind")
 	}

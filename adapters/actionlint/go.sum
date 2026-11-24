@@ -1,5 +1,5 @@
-actionlint.kjanat.dev/v2 v2.0.0-20261124003259-fdc8ecc800d4 h1:MhsfNLcBeahHA4UIVFftbI1qrjVrsQ+rNDij/hmgOx8=
-actionlint.kjanat.dev/v2 v2.0.0-20261124003259-fdc8ecc800d4/go.mod h1:6rp0n6RtbbFv+FoUXfMqP9oR7HdOzlK3yeG5fZhOUGk=
+actionlint.kjanat.dev/v2 v2.0.0-20261124082107-101dfc9baebf h1:7GhQ3hOKlh7julMD18vlUNcnuYTsfUd+eMiz7YGKIaM=
+actionlint.kjanat.dev/v2 v2.0.0-20261124082107-101dfc9baebf/go.mod h1:ZXBjLaOwghkVsH4GiDBUskm/h0BW9Si3OPP5yz9huQQ=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
@@ -29,8 +29,8 @@ github.com/itchyny/timefmt-go v0.1.8 h1:1YEo1JvfXeAHKdjelbYr/uCuhkybaHCeTkH8Bo79
 github.com/itchyny/timefmt-go v0.1.8/go.mod h1:5E46Q+zj7vbTgWY8o5YkMeYb4I6GeWLFnetPy5oBrAI=
 github.com/kjanat/go-yaml/v4 v4.0.0-rc.7 h1:o1uCGobeROzP60y1ZqoxpQdBIpeTIE4j7vHzjzDc0cw=
 github.com/kjanat/go-yaml/v4 v4.0.0-rc.7/go.mod h1:ItoijA0Nx9w23vjt7MoOZC8AHlmUlUPt4QvNJ+47/S8=
-github.com/kjanat/wacogo v0.3.4 h1:njww60OQvb9h1d9t2VppMhHoJmJnI5c3EKBPnE8uBfE=
-github.com/kjanat/wacogo v0.3.4/go.mod h1:qQx/iQFZJxsedo3mUF/UbfAp/xwB3GHc3zyO9xHyyIA=
+github.com/kjanat/wacogo v0.3.8 h1:5ORxAIX0TvvZxIsYVVwG4YuUhIBe+2XDxy6yrXfMifg=
+github.com/kjanat/wacogo v0.3.8/go.mod h1:uWZBjPPIxitUeH6GFfOsZlWKNyRMkpYlg5e/vRjXAhc=
 github.com/kjanat/wazero v1.12.2 h1:KBXGrCQGza+opf6VsEPwczp7B7BcNe4WgLjWcBZjAWY=
 github.com/kjanat/wazero v1.12.2/go.mod h1:6j4cEbiug+UYd7xW6B/b66TwMRsJoXjja7tMHeTNXGA=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
