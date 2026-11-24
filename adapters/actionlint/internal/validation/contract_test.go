@@ -2,6 +2,7 @@ package validation
 
 import (
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -40,14 +41,38 @@ func TestAnalyzerCompatibilityUsesExportedTypes(t *testing.T) {
 }
 
 func TestComponentInterfaceVersions(t *testing.T) {
-	for _, current := range []string{component.AnalyzerInterface, component.ScriptEngineInterface, component.ScriptEngine03Interface, component.RunnerInterface, component.Runner03Interface, component.ReferenceResolverInterface} {
-		if !hostSupports(t.Context(), current) {
-			t.Fatalf("current interface %q is unsupported", current)
+	for fixture, exports := range map[string][]string{
+		"component-no-sudo":               {component.AnalyzerInterface},
+		"component-managed-no-sudo":       {component.AnalyzerInterface, component.ToolIntegrationInterface},
+		"component-script":                {component.ScriptEngineInterface},
+		"component-script-0.3.0":          {component.ScriptEngine03Interface},
+		"component-template-script-0.3.0": {component.ScriptEngine03Interface, component.TemplateEffects03Interface},
+		"component-runners":               {component.RunnerInterface},
+		"component-runners-0.3.0":         {component.Runner03Interface},
+	} {
+		data, err := os.ReadFile(hostFixture(t, fixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+		roles, err := admitComponent(t.Context(), data)
+		if err != nil || !slices.Equal(slices.Sorted(slices.Values(roles.Exports())), slices.Sorted(slices.Values(exports))) {
+			t.Fatalf("%s: roles %v, %v; want %v", fixture, roles.Exports(), err, exports)
 		}
 	}
-	for _, other := range []string{"kjanat:actionlint/analyzer@0.1.0", "kjanat:actionlint/script-engine@0.1.0", "kjanat:actionlint/runner-provider@0.4.0", "example:future/analyzer@2.0.0"} {
-		if hostSupports(t.Context(), other) {
-			t.Fatalf("interface %q is supported", other)
+	if roles, err := admitComponent(t.Context(), component.BuiltinCommitishArtifact().Bytes); err != nil || roles.ReferenceResolver != component.ReferenceResolverInterface {
+		t.Fatalf("reference resolver: roles %+v, %v", roles, err)
+	}
+	for _, exports := range [][]string{
+		{"kjanat:actionlint/analyzer@0.1.0"},
+		{"kjanat:actionlint/script-engine@0.1.0"},
+		{"kjanat:actionlint/runner-provider@0.4.0"},
+		{"example:future/analyzer@2.0.0"},
+		{component.AnalyzerInterface, "kjanat:actionlint/tool-integration@0.1.0"},
+		{component.ScriptEngine03Interface, "kjanat:actionlint/template-effects@0.1.0"},
+		{component.AnalyzerInterface, "kjanat:actionlint/runner-provider@0.4.0"},
+	} {
+		if _, err := admitComponent(t.Context(), wasmcomponent.Build(nil, exports, nil)); !errors.Is(err, ErrUnsupportedContract) {
+			t.Fatalf("%v: want unsupported, got %v", exports, err)
 		}
 	}
 }
@@ -68,8 +93,30 @@ func TestDeclaredInterfaceMustMatchExports(t *testing.T) {
 	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, built, interfaceMetadata(older))); !errors.Is(err, ErrUnsupportedContract) {
 		t.Fatalf("an exported interface this host does not load must be unsupported, got %v", err)
 	}
-	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, built, componentMetadata)); err == nil || errors.Is(err, ErrUnsupportedContract) {
-		t.Fatalf("a current declaration over an older export must fail, got %v", err)
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, built, componentMetadata)); !errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("an older export under a current declaration must be unsupported, got %v", err)
+	}
+}
+
+func TestDeclaredSecondaryRole(t *testing.T) {
+	template := strings.Replace(templateMetadata03, `"interface":"`+component.ScriptEngine03Interface+`"`, `"interface":"`+component.TemplateEffects03Interface+`"`, 1)
+	if _, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-template-script-0.3.0", template)); err == nil || errors.Is(err, ErrUnsupportedContract) || !strings.Contains(err.Error(), "script engine static metadata") {
+		t.Errorf("template-effects declared on a script engine: want the host's metadata rejection as a failure, got %v", err)
+	}
+	if _, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-managed-no-sudo", interfaceMetadata(component.ToolIntegrationInterface))); errors.Is(err, ErrUnsupportedContract) {
+		t.Errorf("tool-integration declared on an analyzer that exports it: want its role checks, got %v", err)
+	}
+}
+
+func TestUnprovidedSecondaryExportIsUnsupported(t *testing.T) {
+	future := "kjanat:actionlint/runner-provider@0.4.0"
+	for name, path := range map[string]string{
+		"declared analyzer": appendFixtureMetadata(t, wasmcomponent.Build(nil, []string{component.AnalyzerInterface, future}, nil), componentMetadata),
+		"declared future":   appendFixtureMetadata(t, wasmcomponent.Build(nil, []string{future}, nil), interfaceMetadata(future)),
+	} {
+		if _, err := Validate(t.Context(), testAsOf, path); !errors.Is(err, ErrUnsupportedContract) || !strings.Contains(err.Error(), future) {
+			t.Errorf("%s: want unsupported naming %s, got %v", name, future, err)
+		}
 	}
 }
 

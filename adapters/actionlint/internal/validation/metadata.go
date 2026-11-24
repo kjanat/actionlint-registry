@@ -24,15 +24,12 @@ import (
 // ErrUnsupportedContract identifies a contract version this checker does not implement.
 var ErrUnsupportedContract = errors.New("contract is not supported by this checker")
 
-func hostSupports(ctx context.Context, iface string) bool {
-	_, err := component.Admit(ctx, component.ListedInterfaces{Interfaces: component.Interfaces{Exports: []string{iface}}})
-	return err == nil
-}
-
-// The host lets the reference-resolver role import every interface it provides.
-func hostProvides(ctx context.Context, imported string) bool {
-	_, err := component.Admit(ctx, component.ListedInterfaces{Interfaces: component.Interfaces{Imports: []string{imported}, Exports: []string{component.ReferenceResolverInterface}}})
-	return err == nil
+func admitComponent(ctx context.Context, data []byte) (component.Roles, error) {
+	roles, err := component.Admit(ctx, component.ComponentBytes(data))
+	if errors.Is(err, component.ErrUnprovidedInterface) {
+		return roles, fmt.Errorf("%w: %w", ErrUnsupportedContract, err)
+	}
+	return roles, err
 }
 
 // componentDeclaration compares embedded metadata with the host's rule declaration.
@@ -90,7 +87,7 @@ type embeddedMetadata struct {
 	Descriptor   json.RawMessage `json:"descriptor"`
 }
 
-func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance, interfaces *component.Interfaces) (embeddedMetadata, error) {
+func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance) (embeddedMetadata, error) {
 	var metadata embeddedMetadata
 	if len(info.Metadata) == 0 {
 		return metadata, errors.New("registry admission requires a top-level actionlint.plugin custom section")
@@ -121,17 +118,6 @@ func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance
 		}
 		if contract.Transport != "wasm-component" {
 			return metadata, ErrUnsupportedContract
-		}
-		if interfaces == nil || !slices.Contains(interfaces.Exports, contract.Interface) {
-			return metadata, fmt.Errorf("plugin metadata declares %s; the component does not export it", contract.Interface)
-		}
-		if !hostSupports(ctx, contract.Interface) {
-			return metadata, fmt.Errorf("%w: this host does not load %s", ErrUnsupportedContract, contract.Interface)
-		}
-		for _, imported := range interfaces.Imports {
-			if !hostProvides(ctx, imported) {
-				return metadata, fmt.Errorf("%w: this host does not provide %s", ErrUnsupportedContract, imported)
-			}
 		}
 		if contract.Digest != "" && contract.LegacyDigest != "" {
 			return metadata, errors.New("component metadata declares both wit_sha256 and contract_sha256")

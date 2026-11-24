@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"actionlint.kjanat.dev/v2/internal/development/tests/testutil/wasmcomponent"
 	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
 	"actionlint.kjanat.dev/v2/internal/model/rule"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
-	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
 )
 
 const componentMetadata = `{"metadata_version":1,"transport":"wasm-component","id":"no-sudo","name":"No sudo","description":"Registry component fixture","license":"MIT","repository":"https://github.com/example/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/analyzer@0.2.0","wit_sha256":"287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23","descriptor":{"name":"no-sudo","description":"Check runner privilege assumptions","category":"suspicious","subcategory":"scripts","maturity":"stable","provider":"example","explanation":"Self-hosted runners may not provide sudo.","help":"Run without privilege elevation or explicitly prepare the runner.","options_schema":{},"required_inputs":["scripts","invocations"]}}`
@@ -163,12 +163,12 @@ func TestEmptyRequiredInputsAreEquivalent(t *testing.T) {
 }
 
 func TestUnknownContractCheckedBeforeHostSpecificFields(t *testing.T) {
-	for _, info := range []pluginartifact.ArtifactProvenance{
-		{Kind: pluginartifact.Component, Metadata: []byte(`{"transport":"wasm-component","interface":"example:future/analyzer@2.0.0","wit_sha256":"future","abi_version":{"unrelated":"extension"},"descriptor":{"requires":{"new":"shape"}}}`)},
-		{Kind: pluginartifact.Core, Metadata: []byte(`{"transport":"wasm-core-json","abi_version":999,"interface":{"unrelated":"extension"},"interfaces":{"check":"new-shape"}}`)},
-	} {
-		if _, err := inspectMetadata(t.Context(), info, &component.Interfaces{Imports: []string{}, Exports: []string{"example:future/analyzer@2.0.0"}}); !errors.Is(err, ErrUnsupportedContract) {
-			t.Fatalf("unknown contract became runtime failure: %v", err)
-		}
+	core := pluginartifact.ArtifactProvenance{Kind: pluginartifact.Core, Metadata: []byte(`{"transport":"wasm-core-json","abi_version":999,"interface":{"unrelated":"extension"},"interfaces":{"check":"new-shape"}}`)}
+	if _, err := inspectMetadata(t.Context(), core); !errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("unknown core contract became runtime failure: %v", err)
+	}
+	future := wasmcomponent.Build(nil, []string{"example:future/analyzer@2.0.0"}, nil)
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, future, `{"transport":"wasm-component","interface":"example:future/analyzer@2.0.0","wit_sha256":"future","abi_version":{"unrelated":"extension"},"descriptor":{"requires":{"new":"shape"}}}`)); !errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("unknown component contract became runtime failure: %v", err)
 	}
 }

@@ -25,12 +25,13 @@ The process boundary does not provide an operating-system sandbox.
 
 The checker uses the actionlint v2 revision required in `go.mod` and reports it
 from the build. Its tests load runtime fixtures from that host module.
-It supports core ABI 1. Components pass the host's own admission decision,
-`component.Admit`, so the checker accepts the components that host revision
-loads, with the roles that decision returns. The metadata `interface` must name one
-of the component's exports. A component whose declared interface is missing from
-its exports, or one the host rejects, returns `failed`. A declared interface the
-host does not load, or an import the host does not provide, returns `unsupported`.
+It supports core ABI 1. The checker runs the host's own admission decision,
+`component.Admit`, on the component's bytes before it reads the metadata, and
+checks the roles that decision returns. The metadata `interface` must name one
+of the component's exports. When `component.Admit` rejects a component for an
+export or import that this host revision does not provide, the outcome is
+`unsupported`, whatever the metadata declares. Every other rejection returns
+`failed`.
 The host validates exported component types. A WIT source checksum also covers
 documentation comments, so a different checksum alone does not reject an analyzer.
 Each admitted role runs its own checks. Analyzers check a sample workflow twice

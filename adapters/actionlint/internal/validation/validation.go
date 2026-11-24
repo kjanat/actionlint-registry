@@ -98,7 +98,15 @@ func (opened Artifact) Validate(ctx context.Context, runnerAsOf lifecycle.Date) 
 		return Result{}, errors.New("validation requires a runner assessment date")
 	}
 	info := opened.resolved.Info
-	manifest, err := inspectMetadata(ctx, info, opened.Interfaces)
+	var roles component.Roles
+	if info.Kind == pluginartifact.Component {
+		admitted, err := admitComponent(ctx, opened.resolved.Bytes)
+		if err != nil {
+			return Result{}, err
+		}
+		roles = admitted
+	}
+	manifest, err := inspectMetadata(ctx, info)
 	if err != nil {
 		return Result{}, err
 	}
@@ -107,7 +115,7 @@ func (opened Artifact) Validate(ctx context.Context, runnerAsOf lifecycle.Date) 
 	case pluginartifact.Core:
 		result, err = validateCore(ctx, opened.path)
 	case pluginartifact.Component:
-		result, err = validateComponent(ctx, opened.resolved, manifest, runnerAsOf)
+		result, err = validateComponent(ctx, opened.resolved, roles, manifest, runnerAsOf)
 	default:
 		return Result{}, errors.New("unsupported artifact kind")
 	}

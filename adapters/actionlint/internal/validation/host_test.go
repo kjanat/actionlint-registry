@@ -18,6 +18,7 @@ var hostFixtures = map[string]string{
 	"core-echo":                       "internal/plugins/pluginexecution/module/testdata/engines/echo.wasm",
 	"core-missing-export":             "internal/plugins/pluginexecution/module/testdata/wat/missing-export.wasm",
 	"component-no-sudo":               "internal/plugins/pluginexecution/component/testdata/plugins/no-sudo.wasm",
+	"component-managed-no-sudo":       "internal/plugins/pluginexecution/component/testdata/plugins/managed-no-sudo.wasm",
 	"component-script":                "internal/plugins/pluginexecution/component/testdata/plugins/script-engine.wasm",
 	"component-runners":               "internal/plugins/pluginexecution/component/testdata/plugins/buildkite-runners.wasm",
 	"component-runners-0.3.0":         "internal/plugins/pluginexecution/component/testdata/plugins/runner-support-0.3.0.wasm",

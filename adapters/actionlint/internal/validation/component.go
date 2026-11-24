@@ -35,11 +35,7 @@ type roleEvidence struct {
 	checks []string
 }
 
-func validateComponent(ctx context.Context, artifact *pluginartifact.Artifact, metadata embeddedMetadata, asOf lifecycle.Date) (result Result, err error) {
-	roles, err := component.Admit(ctx, component.ComponentBytes(artifact.Bytes))
-	if err != nil {
-		return result, err
-	}
+func validateComponent(ctx context.Context, artifact *pluginartifact.Artifact, roles component.Roles, metadata embeddedMetadata, asOf lifecycle.Date) (result Result, err error) {
 	plugin, err := component.LoadArtifact(ctx, artifact, componentOptions)
 	if err != nil {
 		return result, err
