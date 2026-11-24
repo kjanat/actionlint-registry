@@ -208,16 +208,34 @@ func TestRecheckRejectsCheckerIgnoringStoredDate(t *testing.T) {
 	}
 }
 
-func TestCheckRejectsDateOtherThanObservationDay(t *testing.T) {
+func TestCheckRejectsDateOtherThanRegistryDate(t *testing.T) {
 	_, _, entry, executable, path := recheckFixture(t, "ignores-date")
 	if _, err := CheckCompatibility(t.Context(), executable, path, entry, ""); err == nil || !strings.Contains(err.Error(), "instead of \""+today()+"\"") {
 		t.Fatalf("report dated %s was accepted without a requested date: %v", foreignDateFixture, err)
 	}
 }
 
+func TestCheckPassesTodayToProtocol2Checker(t *testing.T) {
+	_, _, entry, _, path := recheckFixture(t, "passed")
+	date := today()
+	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"v2"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":%q}`, entry.Submission.SHA256, date)
+	checker, argsLog := shellChecker(t, 2, report)
+	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(calls) != 2 || calls[0] != compatibility.ProtocolProbe || !strings.HasPrefix(calls[1], "--runner-as-of "+date+" ") {
+		t.Fatalf("protocol 2 checker did not receive the registry's date: %q", calls)
+	}
+}
+
 // shellChecker writes a POSIX shell checker that logs its arguments. A protocol
 // 1 checker accepts exactly one existing artifact path, like the original
-// checker; protocol 2 and later answer the probe.
+// checker; protocol 2 and later answer the probe and accept --runner-as-of.
 func shellChecker(t *testing.T, protocol int, report string) (string, string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -228,6 +246,7 @@ func shellChecker(t *testing.T, protocol int, report string) (string, string) {
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\n"
 	if protocol > 1 {
 		script += fmt.Sprintf("if [ \"$1\" = %s ]; then printf '%%s\\n' %d; exit 0; fi\n", compatibility.ProtocolProbe, protocol)
+		script += "if [ \"$1\" = --runner-as-of ]; then shift 2; fi\n"
 	}
 	script += "[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '%s\\n' '" + report + "'\n"
 	path := filepath.Join(directory, "checker")

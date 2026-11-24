@@ -158,13 +158,13 @@ report under `registry/compatibility` together with the accepted record.
 Before each check the registry runs the checker with `--protocol`. A protocol 2
 checker prints `2`; a protocol 1 checker treats the argument as a missing
 artifact and exits with an error. Protocol 2 reports carry a required
-`runner_as_of`, the runner assessment date the checker used. Admission and
-unpublished checks use the current UTC date. `check --plugin --version` passes
-`--runner-as-of` with the date of the version's earliest dated record, or uses the
-current UTC date when no record has one. The registry rejects a protocol 2 report
-whose date differs from the requested date, or from the UTC day of the observation
-when no date was requested. A protocol 1 checker receives no date and its records
-stay undated.
+`runner_as_of`, the runner assessment date the checker used. The registry passes
+every protocol 2 checker `--runner-as-of`. `check --plugin --version` passes the
+date of the version's earliest dated record. Admission, unpublished checks and
+versions without a dated record pass the current UTC date, taken before the
+checker starts. The registry rejects a protocol 2 report whose date differs from
+the date it passed. A protocol 1 checker receives no date and its records stay
+undated.
 
 For release preparation, the [shared candidate check](publishing.md) also installs
 the exact local bytes through actionlint and executes a publisher-supplied fixture.

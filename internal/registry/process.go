@@ -48,8 +48,8 @@ func CheckCompatibility(ctx context.Context, executable, path string, entry Entr
 
 // CheckArtifact observes a local candidate without requiring publication. The
 // caller supplies the inspected digest; the checker receives a verified snapshot.
-// A protocol 2 checker receives a non-empty runnerAsOf and otherwise uses the
-// current UTC date. A protocol 1 checker receives no date and reports none.
+// A protocol 2 checker receives runnerAsOf, or the current UTC date when it is
+// empty, and must report that date. A protocol 1 checker receives no date.
 func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runnerAsOf string) (evidence compatibility.Evidence, err error) {
 	executable, err = filepath.Abs(executable)
 	if err != nil {
@@ -89,7 +89,10 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runner
 		return evidence, err
 	}
 	var args []string
-	if protocol >= 2 && runnerAsOf != "" {
+	if protocol >= 2 {
+		if runnerAsOf == "" {
+			runnerAsOf = time.Now().UTC().Format(time.DateOnly)
+		}
 		args = append(args, "--runner-as-of", runnerAsOf)
 	}
 	stdout := &boundedBuffer{limit: 1 << 20}
@@ -106,14 +109,8 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runner
 	if evidence.Report.SchemaVersion != protocol {
 		return evidence, fmt.Errorf("checker answered protocol %d but reported schema_version %d", protocol, evidence.Report.SchemaVersion)
 	}
-	if protocol >= 2 {
-		expected := runnerAsOf
-		if expected == "" {
-			expected = evidence.ObservedAt.Format(time.DateOnly)
-		}
-		if evidence.Report.RunnerAsOf != expected {
-			return evidence, fmt.Errorf("checker used runner assessment date %q instead of %q", evidence.Report.RunnerAsOf, expected)
-		}
+	if protocol >= 2 && evidence.Report.RunnerAsOf != runnerAsOf {
+		return evidence, fmt.Errorf("checker used runner assessment date %q instead of %q", evidence.Report.RunnerAsOf, runnerAsOf)
 	}
 	return evidence, evidence.Validate()
 }
