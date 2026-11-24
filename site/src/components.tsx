@@ -85,7 +85,7 @@ export function Layout(
 		root: string;
 		title: string;
 		children: ComponentChildren;
-		observedAt: string | null;
+		observedAt?: string | null;
 	},
 ) {
 	return (
@@ -97,13 +97,13 @@ export function Layout(
 				<title>{title}</title>
 				<link rel='stylesheet' href={`${root}assets/site.css`} />
 				<link rel='icon' href={`${brand}actionlint-mark.svg`} type='image/svg+xml' />
-				<script type='module' src={`${root}assets/client.js`} />
+				{observedAt !== undefined && <script type='module' src={`${root}assets/client.js`} />}
 			</head>
 			<body>
 				<Header root={root} />
 				<main id='main' class='wrap' tabIndex={-1}>
 					{children}
-					<Help root={root} observedAt={observedAt} />
+					{observedAt !== undefined && <Help root={root} observedAt={observedAt} />}
 				</main>
 				<footer>
 					<div class='wrap'>
@@ -312,6 +312,19 @@ export function Home({ root, data, state }: { root: string; data: SiteData; stat
 			>
 				<Directory root={root} plugins={data.plugins} state={state} />
 			</div>
+		</Layout>
+	);
+}
+
+export function NotFound() {
+	return (
+		<Layout root='/' title='404 | actionlint plugin registry'>
+			<section class='intro'>
+				<h1>Page not found</h1>
+				<p>
+					<a href='/'>Browse plugins</a>
+				</p>
+			</section>
 		</Layout>
 	);
 }

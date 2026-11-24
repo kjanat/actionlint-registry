@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { render } from 'preact-render-to-string';
 import { loadCatalogue } from '#catalogue.ts';
-import { Home, PluginPage } from '#components.tsx';
+import { Home, NotFound, PluginPage } from '#components.tsx';
 import { pageSize, staticPath } from '#directory.ts';
 import type { Sort } from '#directory.ts';
 import { writePluginConfigSchemas } from '#plugin-config-schemas.ts';
@@ -72,5 +72,6 @@ export async function buildSite(input: string, output: string): Promise<number> 
 	for (const plugin of data.plugins) {
 		await page(plugin.path, render(<PluginPage plugin={plugin} observedAt={data.observedAt} />));
 	}
+	await page('404.html', render(<NotFound />));
 	return data.plugins.length;
 }
