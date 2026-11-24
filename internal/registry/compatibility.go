@@ -72,7 +72,7 @@ func (store EvidenceStore) Add(index Index, evidence compatibility.Evidence) err
 	if err := validateEvidence(index, evidence); err != nil {
 		return err
 	}
-	return store.write(evidence)
+	return store.write(evidence, nil)
 }
 
 func validateEvidence(index Index, evidence compatibility.Evidence) error {
@@ -82,7 +82,7 @@ func validateEvidence(index Index, evidence compatibility.Evidence) error {
 	return acceptedRelease(index, evidence)
 }
 
-func (store EvidenceStore) write(evidence compatibility.Evidence) error {
+func (store EvidenceStore) write(evidence compatibility.Evidence, writes *mergeWrites) error {
 	name, err := evidenceName(evidence)
 	if err != nil {
 		return err
@@ -91,7 +91,13 @@ func (store EvidenceStore) write(evidence compatibility.Evidence) error {
 	if err = safePath(path); err != nil {
 		return err
 	}
-	if err = os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err = os.MkdirAll(store.Directory, 0o755); err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err = os.Mkdir(dir, 0o755); err == nil {
+		writes.record(dir)
+	} else if !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	data, err := json.MarshalIndent(evidence, "", "  ")
@@ -99,7 +105,7 @@ func (store EvidenceStore) write(evidence compatibility.Evidence) error {
 		return err
 	}
 	// Reuse the immutable, atomic record writer. An identical report is idempotent.
-	if err = writeImmutableJSON(path, evidence); !errors.Is(err, os.ErrExist) {
+	if err = writeTrackedJSON(path, evidence, writes); !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	old, err := os.ReadFile(path)
@@ -112,14 +118,14 @@ func (store EvidenceStore) write(evidence compatibility.Evidence) error {
 	return nil
 }
 
-func (store EvidenceStore) addAll(index Index, observations []compatibility.Evidence) error {
+func (store EvidenceStore) addAll(index Index, observations []compatibility.Evidence, writes *mergeWrites) error {
 	for _, observation := range observations {
 		if err := validateEvidence(index, observation); err != nil {
 			return err
 		}
 	}
 	for _, observation := range observations {
-		if err := store.write(observation); err != nil {
+		if err := store.write(observation, writes); err != nil {
 			return err
 		}
 	}
@@ -184,7 +190,7 @@ func (store EvidenceStore) Load(index Index) ([]compatibility.Evidence, error) {
 // MergeCandidate merges admitted records and their compatibility evidence. A
 // version the store does not hold yet needs evidence for its digest.
 func MergeCandidate(store Store, candidate Index, candidateEvidence []compatibility.Evidence, evidence EvidenceStore) error {
-	return store.merge(candidate, func(current, merged Index) error {
+	return store.merge(candidate, func(current, merged Index, writes *mergeWrites) error {
 		for _, entry := range candidate.Entries {
 			if slices.ContainsFunc(current.Entries, func(old Entry) bool { return old.Submission == entry.Submission }) {
 				continue
@@ -193,13 +199,13 @@ func MergeCandidate(store Store, candidate Index, candidateEvidence []compatibil
 				return reject(entry.Name() + "@" + entry.Submission.Tag + " has no compatibility evidence")
 			}
 		}
-		return evidence.addAll(merged, candidateEvidence)
+		return evidence.addAll(merged, candidateEvidence, writes)
 	})
 }
 
 // MergeAdmission writes any checker evidence before accepting the admission.
 func (store Store) MergeAdmission(candidate Index, observations []compatibility.Evidence, evidence EvidenceStore) error {
-	return store.merge(candidate, func(_, merged Index) error {
-		return evidence.addAll(merged, observations)
+	return store.merge(candidate, func(_, merged Index, writes *mergeWrites) error {
+		return evidence.addAll(merged, observations, writes)
 	})
 }

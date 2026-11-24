@@ -91,6 +91,56 @@ func TestMergeCandidateValidatesOCIEvidenceBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestMergeRollsBackEvidenceAfterReleaseWriteFailure(t *testing.T) {
+	previous := acceptedFixture(t)
+	entry := changedArtifactFixture(t, previous, "v2.0.0", "component", "plugin.component.wasm")
+	existing := EmptyIndex()
+	if err := existing.Add(previous); err != nil {
+		t.Fatal(err)
+	}
+	candidate := EmptyIndex()
+	if err := candidate.Add(entry); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	releases := Store{Directory: filepath.Join(root, "plugins")}
+	evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
+	original := observation(previous, "passed")
+	if err := releases.MergeAdmission(existing, []compatibility.Evidence{original}, evidence); err != nil {
+		t.Fatal(err)
+	}
+	versions := filepath.Join(releases.Directory, entry.PluginKey(), "versions")
+	savedVersions := filepath.Join(root, "saved-versions")
+	err := releases.merge(candidate, func(_, merged Index, writes *mergeWrites) error {
+		if err := evidence.addAll(merged, []compatibility.Evidence{original, observation(entry, "passed")}, writes); err != nil {
+			return err
+		}
+		if err := os.Rename(versions, savedVersions); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(versions, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("merge succeeded with a blocked release path")
+	}
+	if err := os.Remove(versions); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(savedVersions, versions); err != nil {
+		t.Fatal(err)
+	}
+	index, err := releases.Load()
+	if err != nil || len(index.Entries) != 1 || index.Entries[0].Submission != previous.Submission {
+		t.Fatalf("releases after failed merge: %+v, %v", index, err)
+	}
+	if stored, err := evidence.Load(index); err != nil || len(stored) != 1 || stored[0].Release() != original.Release() {
+		t.Fatalf("evidence after failed merge: %+v, %v", stored, err)
+	}
+}
+
 func TestCompatibilityEvidenceDoesNotRewriteRelease(t *testing.T) {
 	entry := acceptedFixture(t)
 	index := EmptyIndex()
