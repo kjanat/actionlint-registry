@@ -160,10 +160,11 @@ a new version that has no report in `--candidate-compatibility`.
 
 Before each check the registry runs the checker with `--protocol`, with a
 5-second limit. A protocol 2 checker prints `2`; a protocol 1 checker treats the
-argument as a missing artifact, exits with a non-zero status and prints nothing.
-A probe that times out or ends by a signal fails the check. Protocol 2 reports carry a required
-`runner_as_of`, the runner assessment date the checker used. The registry passes
-every protocol 2 checker `--runner-as-of`. `check --plugin --version` passes the
+argument as a missing artifact, exits with status 1 and prints nothing. A probe
+that times out, ends by a signal or exits with any other status, such as a Go
+panic's 2, fails the check. Protocol 2 reports carry a required `runner_as_of`,
+the runner assessment date the checker used. The registry passes every protocol 2
+checker `--runner-as-of`. `check --plugin --version` passes the
 date of the version's earliest dated record. Admission, unpublished checks and
 versions without a dated record pass the current UTC date, taken before the
 checker starts. The registry rejects a protocol 2 report whose date differs from

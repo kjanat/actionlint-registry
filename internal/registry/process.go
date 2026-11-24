@@ -118,8 +118,8 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runner
 var checkerProbeTimeout = 5 * time.Second
 
 // checkerProtocol asks the checker for its protocol version. A protocol 1
-// checker treats the probe as a missing artifact: it exits non-zero and prints
-// nothing to stdout.
+// checker treats the probe as a missing artifact: it exits with status 1 and
+// prints nothing to stdout. A Go panic exits with status 2.
 func checkerProtocol(ctx context.Context, checkerPath, dir string) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, checkerProbeTimeout)
 	defer cancel()
@@ -132,7 +132,7 @@ func checkerProtocol(ctx context.Context, checkerPath, dir string) (int, error) 
 		return 0, fmt.Errorf("checker protocol probe did not finish: %w", errors.Join(ctx.Err(), err))
 	case err == nil && answer == strconv.Itoa(compatibility.ProtocolVersion):
 		return compatibility.ProtocolVersion, nil
-	case errors.As(err, &exit) && exit.Exited() && exit.ExitCode() > 0 && answer == "":
+	case errors.As(err, &exit) && exit.Exited() && exit.ExitCode() == 1 && answer == "":
 		return 1, nil
 	case err != nil:
 		return 0, fmt.Errorf("checker protocol probe failed: %w", err)

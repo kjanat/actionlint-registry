@@ -31,6 +31,9 @@ func TestCapturedOutputCannotBypassLimit(t *testing.T) {
 // The test executable acts as a checker when launched on the parent's snapshot.
 func TestMain(m *testing.M) {
 	runnerAsOf, args := time.Now().UTC().Format(time.DateOnly), os.Args[1:]
+	if os.Getenv(panickingCheckerVariable) == "1" {
+		panic("checker crashed")
+	}
 	if len(args) == 1 && args[0] == compatibility.ProtocolProbe {
 		fmt.Println(compatibility.ProtocolVersion)
 		os.Exit(0)
@@ -317,5 +320,21 @@ func TestCheckRejectsAbnormalProtocolProbe(t *testing.T) {
 				t.Fatalf("abnormal probe was not reported as a probe failure: %v", err)
 			}
 		})
+	}
+}
+
+const panickingCheckerVariable = "REGISTRY_TEST_PANICKING_CHECKER"
+
+// A Go panic exits with status 2 and prints nothing to stdout; only status 1
+// identifies a protocol 1 checker.
+func TestCheckRejectsPanickingProtocolProbe(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, entry, _, path := recheckFixture(t, "passed")
+	checker := writeShellChecker(t, t.TempDir(), panickingCheckerVariable+"=1 exec '"+executable+"' \"$@\"\n")
+	if _, err := CheckCompatibility(t.Context(), checker, path, entry, ""); err == nil || !strings.Contains(err.Error(), "checker protocol probe failed: exit status 2") {
+		t.Fatalf("panicking probe was not reported as a probe failure: %v", err)
 	}
 }
