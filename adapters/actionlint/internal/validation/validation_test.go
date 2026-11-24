@@ -251,3 +251,25 @@ func TestSharedFacts(t *testing.T) {
 		t.Fatalf("missing authentic workflow facts: %+v", input)
 	}
 }
+
+type nurseryAnalyzer struct{ called bool }
+
+func (*nurseryAnalyzer) Descriptor() checkinputs.Descriptor {
+	return checkinputs.Descriptor{Name: "registry-nursery-test", Description: "Exercise a nursery rule", Category: "correctness", Maturity: rule.NurseryMaturity, Recommended: true}
+}
+
+func (candidate *nurseryAnalyzer) AnalyzeDocument(context.Context, checkinputs.AnalyzerInput) ([]results.Diagnostic, error) {
+	candidate.called = true
+	return nil, nil
+}
+
+func TestSmokeChecksRunNurseryRules(t *testing.T) {
+	candidate := &nurseryAnalyzer{}
+	if _, err := analyzeComponent(t.Context(), candidate, sampleWorkflow, []string{"registry-nursery-test"}); err != nil || !candidate.called {
+		t.Fatalf("nursery analyzer called=%v error=%v", candidate.called, err)
+	}
+	engine := rule.Descriptor{Name: "registry-nursery-engine", Description: "Exercise a nursery engine", Category: "correctness", Maturity: rule.NurseryMaturity, Recommended: true}
+	if _, err := workflowInputWithDescriptor(t.Context(), sampleWorkflow, engine); err != nil {
+		t.Fatalf("nursery engine registration: %v", err)
+	}
+}

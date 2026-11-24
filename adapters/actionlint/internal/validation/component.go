@@ -9,6 +9,7 @@ import (
 
 	checking "actionlint.kjanat.dev/v2/internal/checking"
 	"actionlint.kjanat.dev/v2/internal/checking/scriptanalysis/registry"
+	"actionlint.kjanat.dev/v2/internal/input/configuration"
 	"actionlint.kjanat.dev/v2/internal/input/workspace"
 	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
 	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
@@ -162,7 +163,7 @@ func analyzeComponent(ctx context.Context, analyzer results.Analyzer, content st
 
 func runComponentCheck(ctx context.Context, analyzer results.Analyzer, content string, names []string) (*checkedAnalyzer, error) {
 	checked := &checkedAnalyzer{Analyzer: analyzer, rules: names}
-	options := checking.Options{Analyzers: []results.AnalyzerRegistration{{Analyzer: checked}}}
+	options := checking.Options{Analyzers: []results.AnalyzerRegistration{{Analyzer: checked}}, Presets: configuration.Presets{Experimental: new(true)}}
 	if integrator, ok := analyzer.(checkinputs.ToolIntegrator); ok && integrator.ToolIntegration() != nil {
 		tool := integrator.ToolIntegration().Tool
 		if !slices.Contains(registry.IDs(), tool) {
@@ -208,7 +209,7 @@ func workflowInputWithSchema(ctx context.Context, content string, schema json.Ra
 func workflowInputWithDescriptor(ctx context.Context, content string, descriptor rule.Descriptor) (checkinputs.AnalyzerInput, error) {
 	collector := &inputCollector{descriptor: descriptor}
 	_, err := checking.Analyze(ctx,
-		checking.Options{Analyzers: []results.AnalyzerRegistration{{Analyzer: collector}}},
+		checking.Options{Analyzers: []results.AnalyzerRegistration{{Analyzer: collector}}, Presets: configuration.Presets{Experimental: new(true)}},
 		[]workspace.InputFile{{Path: samplePath, Content: []byte(content)}},
 	)
 	if err != nil {
