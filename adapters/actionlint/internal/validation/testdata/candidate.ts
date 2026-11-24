@@ -46,16 +46,34 @@ export async function verify({ directory, run }: Context): Promise<{ checks: str
 	assert.equal(finding.rule, 'no-sudo');
 	assert.equal(finding.severity, 'warning');
 	assert.deepEqual(finding.start, { line: 11, column: 11 });
+	const strictProbe = ['check', '--strict', '--json', 'workflow.yml'];
+	const strict = object(JSON.parse(await run(strictProbe, 1)));
+	assert.equal(strict.completed, true);
+	assert.equal(strict.exit_code, 1);
+	assert.equal(strict.failure_threshold, 'warning');
+	assert.ok(Array.isArray(strict.diagnostics));
+	assert.deepEqual(strict.diagnostics.map(diagnostic => object(diagnostic).rule), ['no-sudo']);
 	await writeFile(join(directory, 'workflow.yml'), workflow.replace('sudo ', ''));
 	try {
 		const clean = object(JSON.parse(await run(probe)));
 		assert.equal(clean.completed, true);
 		assert.equal(clean.exit_code, 0);
 		assert.deepEqual(clean.diagnostics, []);
+		const strictClean = object(JSON.parse(await run(strictProbe)));
+		assert.equal(strictClean.completed, true);
+		assert.equal(strictClean.exit_code, 0);
+		assert.deepEqual(strictClean.diagnostics, []);
 	} finally {
 		await writeFile(join(directory, 'workflow.yml'), workflow);
 	}
-	return { checks: ['mapped no-sudo diagnostic', 'source correction clears diagnostic'], probe };
+	return {
+		checks: [
+			'mapped no-sudo diagnostic',
+			'strict check fails on the plugin warning',
+			'source correction clears diagnostic',
+		],
+		probe,
+	};
 }
 
 function unsignedLEB(value: number): number[] {
