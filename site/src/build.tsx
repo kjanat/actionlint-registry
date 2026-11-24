@@ -28,6 +28,7 @@ export async function buildSite(input: string, output: string): Promise<number> 
 		await copyJSON(resolve(input), destination);
 	}
 	await writePluginConfigSchemas(destination, data.configurationSources);
+	await copyFile(new URL('../static/tombi.toml', import.meta.url), join(destination, 'tombi.toml'));
 	const source = fileURLToPath(new URL('.', import.meta.url));
 	const assets = join(resolve(output), 'assets');
 	await mkdir(assets, { recursive: true });

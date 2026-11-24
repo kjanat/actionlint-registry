@@ -271,6 +271,17 @@ conflicting tool when replacing it, for example `--no-tool=shellcheck`.
 
 ### Plugin configuration schemas
 
+For TOML, add the registry preset to your project's `tombi.toml`.
+
+```toml
+extends = ["https://plugins.actionlint.kjanat.dev/tombi.toml"]
+```
+
+The preset keeps Tombi's default catalogs and associates the base actionlint
+schema with `actionlint.toml`. For a schema that includes your project's plugins,
+run `actionlint config schema >.github/actionlint.local.schema.json` and add
+`#:schema ./actionlint.local.schema.json` to `.github/actionlint.toml`.
+
 To enable completion and validation in VS Code with the YAML extension, run this
 from your project root after configuring your plugins.
 
