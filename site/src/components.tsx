@@ -20,6 +20,20 @@ export function Count({ metric }: { metric: Metric }) {
 		: <span>{metric.state}</span>;
 }
 
+function InterfaceList({ names }: { names: string[] }) {
+	return names.length
+		? (
+			<ul role='list'>
+				{names.map(name => (
+					<li key={name}>
+						<code>{name}</code>
+					</li>
+				))}
+			</ul>
+		)
+		: <span>None</span>;
+}
+
 function Header({ root }: { root: string }) {
 	return (
 		<>
@@ -389,6 +403,22 @@ export function PluginPage({ plugin, observedAt }: { plugin: Plugin; observedAt:
 										</dd>
 									</div>
 								</dl>
+								{release.interfaces && (
+									<dl class='interfaces'>
+										<div>
+											<dt>Exports</dt>
+											<dd>
+												<InterfaceList names={release.interfaces.exports} />
+											</dd>
+										</div>
+										<div>
+											<dt>Imports</dt>
+											<dd>
+												<InterfaceList names={release.interfaces.imports} />
+											</dd>
+										</div>
+									</dl>
+								)}
 								{(release.state === 'active' || release.state === 'deprecated') && (
 									<p class='install'>
 										<code>actionlint plugin install {release.reference}</code>

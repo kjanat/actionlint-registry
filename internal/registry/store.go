@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -161,14 +162,37 @@ func (s Store) Load() (Index, error) {
 // Merge validates every candidate record before writing any of them. The publication
 // workflow permits only one writer at a time, and existing immutable files are never replaced.
 func (s Store) Merge(candidate Index) error {
+	return s.merge(candidate, nil)
+}
+
+type mergeWrites []string
+
+func (w *mergeWrites) record(paths ...string) {
+	if w != nil {
+		*w = append(*w, paths...)
+	}
+}
+
+func (w mergeWrites) rollback() error {
+	var err error
+	for _, path := range slices.Backward(w) {
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
+		}
+	}
+	return err
+}
+
+func (s Store) merge(candidate Index, beforeWrite func(current, merged Index, writes *mergeWrites) error) (err error) {
 	if candidate.SchemaVersion != 1 {
 		return errors.New("unsupported candidate schema_version")
 	}
-	existing, err := s.Load()
+	current, err := s.Load()
 	if err != nil {
 		return err
 	}
-	original := len(existing.Entries)
+	existing := current
+	existing.Entries = slices.Clip(current.Entries)
 	for _, entry := range candidate.Entries {
 		if err = existing.Add(entry); err != nil {
 			return err
@@ -181,7 +205,26 @@ func (s Store) Merge(candidate Index) error {
 			return errors.New("serialized version record exceeds 2 MiB")
 		}
 	}
-	if len(existing.Entries) == original {
+	var releaseWrites *mergeWrites
+	if beforeWrite != nil {
+		releaseWrites = new(mergeWrites)
+		var evidenceWrites mergeWrites
+		defer func() {
+			if err == nil {
+				return
+			}
+			// Keep evidence if a release could not be rolled back.
+			if rollbackErr := releaseWrites.rollback(); rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+				return
+			}
+			err = errors.Join(err, evidenceWrites.rollback())
+		}()
+		if err = beforeWrite(current, existing, &evidenceWrites); err != nil {
+			return err
+		}
+	}
+	if len(existing.Entries) == len(current.Entries) {
 		return nil
 	}
 	for _, entry := range candidate.Entries {
@@ -193,7 +236,7 @@ func (s Store) Merge(candidate Index) error {
 			if err = os.MkdirAll(s.Directory, 0o755); err != nil {
 				return err
 			}
-			if err = s.createPlugin(base, entry); err != nil {
+			if err = s.createPlugin(base, entry, releaseWrites); err != nil {
 				return err
 			}
 		} else if err != nil {
@@ -205,14 +248,14 @@ func (s Store) Merge(candidate Index) error {
 			} else if !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
-			if err = writeImmutableJSON(path, entry); err != nil {
+			if err = writeTrackedJSON(path, entry, releaseWrites); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
 }
-func (s Store) createPlugin(path string, entry Entry) (err error) {
+func (s Store) createPlugin(path string, entry Entry, writes *mergeWrites) (err error) {
 	temp, err := os.MkdirTemp(s.Directory, ".plugin-")
 	if err != nil {
 		return err
@@ -221,12 +264,22 @@ func (s Store) createPlugin(path string, entry Entry) (err error) {
 	if err = WriteJSON(filepath.Join(temp, "plugin.json"), pluginFor(entry)); err != nil {
 		return err
 	}
-	if err = WriteJSON(filepath.Join(temp, "versions", key(entry.Submission.Tag)+".json"), entry); err != nil {
+	versionFile := key(entry.Submission.Tag) + ".json"
+	if err = WriteJSON(filepath.Join(temp, "versions", versionFile), entry); err != nil {
 		return err
 	}
-	return os.Rename(temp, path)
+	if err = os.Rename(temp, path); err != nil {
+		return err
+	}
+	writes.record(path, filepath.Join(path, "plugin.json"), filepath.Join(path, "versions"), filepath.Join(path, "versions", versionFile))
+	return nil
 }
-func writeImmutableJSON(path string, value any) (err error) {
+
+func writeImmutableJSON(path string, value any) error {
+	return writeTrackedJSON(path, value, nil)
+}
+
+func writeTrackedJSON(path string, value any, writes *mergeWrites) (err error) {
 	if err = safePath(path); err != nil {
 		return err
 	}
@@ -245,5 +298,9 @@ func writeImmutableJSON(path string, value any) (err error) {
 		return err
 	}
 	// Hard-link creation is atomic and refuses an existing destination.
-	return os.Link(f.Name(), path)
+	if err = os.Link(f.Name(), path); err != nil {
+		return err
+	}
+	writes.record(path)
+	return nil
 }

@@ -3,13 +3,16 @@ package registry
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"registry.actionlint.kjanat.dev/internal/artifact"
 	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
 
@@ -20,6 +23,124 @@ func observation(entry Entry, outcome string) compatibility.Evidence {
 	}
 	return compatibility.Evidence{Report: compatibility.Report{SchemaVersion: 1, ArtifactSHA256: entry.Submission.SHA256, Host: compatibility.Host{Name: "test-host", Revision: "revision-a"}, Policy: "smoke/1", Outcome: outcome, Checks: []string{"host-abi"}, Detail: detail}, CheckerSHA256: strings.Repeat("a", 64), ObservedAt: time.Now().UTC()}
 }
+
+func TestMergeWritesEvidenceBeforeAcceptingRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		merge func(Store, Index, []compatibility.Evidence, EvidenceStore) error
+	}{
+		{"admit", Store.MergeAdmission},
+		{"merge candidate", MergeCandidate},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := acceptedFixture(t)
+			candidate := EmptyIndex()
+			if err := candidate.Add(entry); err != nil {
+				t.Fatal(err)
+			}
+			root := t.TempDir()
+			releases := Store{Directory: filepath.Join(root, "plugins")}
+			evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
+			observations := []compatibility.Evidence{observation(entry, "passed")}
+			if err := os.WriteFile(evidence.Directory, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.merge(releases, candidate, observations, evidence); err == nil {
+				t.Fatal("accepted a release when its evidence could not be written")
+			}
+			if index, err := releases.Load(); err != nil || len(index.Entries) != 0 {
+				t.Fatalf("releases after failed write: %+v, %v", index, err)
+			}
+			if err := os.Remove(evidence.Directory); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.merge(releases, candidate, observations, evidence); err != nil {
+				t.Fatal(err)
+			}
+			index, err := releases.Load()
+			if err != nil || len(index.Entries) != 1 {
+				t.Fatalf("releases after retry: %+v, %v", index, err)
+			}
+			if stored, err := evidence.Load(index); err != nil || len(stored) != 1 {
+				t.Fatalf("evidence after retry: %+v, %v", stored, err)
+			}
+		})
+	}
+}
+
+func TestMergeCandidateValidatesOCIEvidenceBeforeWriting(t *testing.T) {
+	entry := ociCandidate(t)
+	candidate := EmptyIndex()
+	if err := candidate.Add(entry); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	releases := Store{Directory: filepath.Join(root, "plugins")}
+	evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
+	invalid := observation(entry, "passed")
+	invalid.Report.ArtifactSHA256 = entry.Submission.Digest()
+	valid := layerObservation(entry, strings.Repeat("b", 64))
+	if err := MergeCandidate(releases, candidate, []compatibility.Evidence{valid, invalid}, evidence); err == nil || !strings.Contains(err.Error(), "checked layer") {
+		t.Fatalf("merge with invalid evidence: %v", err)
+	}
+	if index, err := releases.Load(); err != nil || len(index.Entries) != 0 {
+		t.Fatalf("releases after invalid evidence: %+v, %v", index, err)
+	}
+	if stored, err := evidence.Load(EmptyIndex()); err != nil || len(stored) != 0 {
+		t.Fatalf("evidence after invalid evidence: %+v, %v", stored, err)
+	}
+}
+
+func TestMergeRollsBackEvidenceAfterReleaseWriteFailure(t *testing.T) {
+	previous := acceptedFixture(t)
+	entry := changedArtifactFixture(t, previous, "v2.0.0", "component", "plugin.component.wasm")
+	existing := EmptyIndex()
+	if err := existing.Add(previous); err != nil {
+		t.Fatal(err)
+	}
+	candidate := EmptyIndex()
+	if err := candidate.Add(entry); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	releases := Store{Directory: filepath.Join(root, "plugins")}
+	evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
+	original := observation(previous, "passed")
+	if err := releases.MergeAdmission(existing, []compatibility.Evidence{original}, evidence); err != nil {
+		t.Fatal(err)
+	}
+	versions := filepath.Join(releases.Directory, entry.PluginKey(), "versions")
+	savedVersions := filepath.Join(root, "saved-versions")
+	err := releases.merge(candidate, func(_, merged Index, writes *mergeWrites) error {
+		if err := evidence.addAll(merged, []compatibility.Evidence{original, observation(entry, "passed")}, writes); err != nil {
+			return err
+		}
+		if err := os.Rename(versions, savedVersions); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(versions, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("merge succeeded with a blocked release path")
+	}
+	if err := os.Remove(versions); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(savedVersions, versions); err != nil {
+		t.Fatal(err)
+	}
+	index, err := releases.Load()
+	if err != nil || len(index.Entries) != 1 || index.Entries[0].Submission != previous.Submission {
+		t.Fatalf("releases after failed merge: %+v, %v", index, err)
+	}
+	if stored, err := evidence.Load(index); err != nil || len(stored) != 1 || stored[0].Release() != original.Release() {
+		t.Fatalf("evidence after failed merge: %+v, %v", stored, err)
+	}
+}
+
 func TestCompatibilityEvidenceDoesNotRewriteRelease(t *testing.T) {
 	entry := acceptedFixture(t)
 	index := EmptyIndex()
@@ -157,19 +278,134 @@ func TestRegistryHasNoHostSDKDependency(t *testing.T) {
 	}
 }
 func TestCompatibilityReportStrictProtocol(t *testing.T) {
-	e := observation(acceptedFixture(t), "passed")
-	for _, mutate := range []func(*compatibility.Report){
-		func(r *compatibility.Report) { r.SchemaVersion = 99 },
-		func(r *compatibility.Report) { r.Outcome = "maybe" },
-		func(r *compatibility.Report) { r.Host.Revision = "" },
-		func(r *compatibility.Report) { r.Policy = "" },
-		func(r *compatibility.Report) { r.Checks = nil },
+	v1 := observation(acceptedFixture(t), "passed").Report
+	v2 := v1
+	v2.SchemaVersion, v2.RunnerAsOf = 2, "2026-12-08"
+	v3 := v2
+	v3.SchemaVersion = 3
+	listed := v3
+	listed.Imports, listed.Exports = []string{}, []string{"kjanat:actionlint/analyzer@0.2.0"}
+	for _, valid := range []compatibility.Report{v1, v2, v3, listed} {
+		if err := valid.Validate(); err != nil {
+			t.Fatalf("valid protocol %d report rejected: %v", valid.SchemaVersion, err)
+		}
+	}
+	for name, mutate := range map[string]func(*compatibility.Report){
+		"unknown protocol":           func(r *compatibility.Report) { r.SchemaVersion = 4 },
+		"outcome":                    func(r *compatibility.Report) { r.Outcome = "maybe" },
+		"host":                       func(r *compatibility.Report) { r.Host.Revision = "" },
+		"policy":                     func(r *compatibility.Report) { r.Policy = "" },
+		"checks":                     func(r *compatibility.Report) { r.Checks = nil },
+		"protocol 3 without date":    func(r *compatibility.Report) { r.RunnerAsOf = "" },
+		"impossible date":            func(r *compatibility.Report) { r.RunnerAsOf = "2026-02-30" },
+		"short date":                 func(r *compatibility.Report) { r.RunnerAsOf = "2026-12-8" },
+		"protocol 1 with date":       func(r *compatibility.Report) { r.SchemaVersion = 1 },
+		"protocol 2 with interfaces": func(r *compatibility.Report) { r.SchemaVersion = 2 },
+		"imports without exports":    func(r *compatibility.Report) { r.Exports = nil },
+		"exports without imports":    func(r *compatibility.Report) { r.Imports = nil },
+		"empty interface name":       func(r *compatibility.Report) { r.Exports = []string{""} },
+		"multiline interface name":   func(r *compatibility.Report) { r.Imports = []string{"wasi:cli/environment@0.2.0\nexport"} },
+		"long interface name":        func(r *compatibility.Report) { r.Imports = []string{strings.Repeat("a", 513)} },
+		"too many interfaces":        func(r *compatibility.Report) { r.Exports = slices.Repeat([]string{"a"}, 4097) },
 	} {
-		changed := e.Report
+		changed := listed
 		mutate(&changed)
 		if err := changed.Validate(); err == nil {
 			data, _ := json.Marshal(changed)
-			t.Fatalf("invalid report accepted: %s", data)
+			t.Fatalf("%s: invalid report accepted: %s", name, data)
 		}
+	}
+}
+
+func TestEvidenceNamesTheReleaseOfACheckedLayer(t *testing.T) {
+	evidence := observation(acceptedFixture(t), "passed")
+	if evidence.Release() != evidence.Report.ArtifactSHA256 {
+		t.Fatalf("release asset evidence names %s", evidence.Release())
+	}
+	evidence.ReleaseSHA256 = strings.Repeat("c", 64)
+	if err := evidence.Validate(); err != nil || evidence.Release() != evidence.ReleaseSHA256 {
+		t.Fatalf("layer evidence release %s: %v", evidence.Release(), err)
+	}
+	for _, release := range []string{evidence.Report.ArtifactSHA256, "sha256:" + strings.Repeat("c", 64), strings.Repeat("C", 64)} {
+		changed := evidence
+		changed.ReleaseSHA256 = release
+		if err := changed.Validate(); err == nil {
+			t.Fatalf("accepted release digest %q", release)
+		}
+	}
+}
+
+func componentMetadata(platform string) string {
+	return `{"metadata_version":1,"transport":"wasm-component","id":"example","name":"Example","description":"Example for ` + platform + `","license":"MIT","repository":"https://github.com/publisher/plugin","plugin_version":"1.0.0","interface":"kjanat:actionlint/analyzer@0.2.0","wit_sha256":"` + strings.Repeat("a", 64) + `"}`
+}
+
+func exportedVersion(t *testing.T, index Index, evidence []compatibility.Evidence) map[string]json.RawMessage {
+	t.Helper()
+	output := t.TempDir()
+	if err := Export(index, output, nil, nil, evidence...); err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Versions []map[string]json.RawMessage `json:"versions"`
+	}
+	data, err := os.ReadFile(filepath.Join(output, "plugins", index.Entries[0].PluginKey(), "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(data, &manifest); err != nil || len(manifest.Versions) != 1 {
+		t.Fatalf("manifest %s: %v", data, err)
+	}
+	return manifest.Versions[0]
+}
+
+func componentAssetEntry(t *testing.T) Entry {
+	t.Helper()
+	entry := acceptedFixture(t)
+	entry.Submission.Kind = "component"
+	entry.Receipt.Submission = entry.Submission
+	entry.Artifact = &artifact.Declaration{Kind: "component", SHA256: entry.Submission.SHA256, PluginID: "example", PluginVersion: "1.0.0", Repository: "https://github.com/publisher/plugin", Contract: "kjanat:actionlint/analyzer@0.2.0#sha256=" + strings.Repeat("a", 64), Metadata: json.RawMessage(componentMetadata("wasm"))}
+	return entry
+}
+
+func listedObservation(entry Entry, exports ...string) compatibility.Evidence {
+	evidence := observation(entry, "passed")
+	evidence.Report.SchemaVersion, evidence.Report.RunnerAsOf = 3, "2026-12-08"
+	evidence.Report.Imports, evidence.Report.Exports = []string{}, exports
+	return evidence
+}
+
+func TestExportListsComponentInterfaces(t *testing.T) {
+	component, core := componentAssetEntry(t), acceptedFixture(t)
+	analyzer, runner := "kjanat:actionlint/analyzer@0.2.0", "kjanat:actionlint/runner-provider@0.3.0"
+	for name, test := range map[string]struct {
+		entry    Entry
+		evidence []compatibility.Evidence
+		exports  []string
+	}{
+		"component with interfaces":      {component, []compatibility.Evidence{observation(component, "passed"), listedObservation(component, analyzer)}, []string{analyzer}},
+		"component without interfaces":   {component, []compatibility.Evidence{observation(component, "passed")}, nil},
+		"component without evidence":     {component, nil, nil},
+		"component with disagreement":    {component, []compatibility.Evidence{listedObservation(component, analyzer), listedObservation(component, runner)}, nil},
+		"core module with listed report": {core, []compatibility.Evidence{listedObservation(core, analyzer)}, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			index := EmptyIndex()
+			if err := index.Add(test.entry); err != nil {
+				t.Fatal(err)
+			}
+			version := exportedVersion(t, index, test.evidence)
+			imports, hasImports := version["imports"]
+			exported, hasExports := version["exports"]
+			if test.exports == nil {
+				if hasImports || hasExports {
+					t.Fatalf("published interfaces without agreeing component facts: %s %s", imports, exported)
+				}
+				return
+			}
+			var gotImports, gotExports []string
+			if err := errors.Join(json.Unmarshal(imports, &gotImports), json.Unmarshal(exported, &gotExports)); err != nil || gotImports == nil || len(gotImports) != 0 || !slices.Equal(gotExports, test.exports) {
+				t.Fatalf("imports %s exports %s: %v", imports, exported, err)
+			}
+		})
 	}
 }

@@ -22,6 +22,17 @@
       },
       "additionalProperties": false
     },
+    "interfaces": {
+      "description": "Top-level component interface names, spelled as in the binary.",
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^[^\\u0000\\r\\n]*$"
+      }
+    },
     "report": {
       "type": "object",
       "required": [
@@ -32,6 +43,14 @@
         "policy",
         "schema_version"
       ],
+      "dependentRequired": {
+        "exports": [
+          "imports"
+        ],
+        "imports": [
+          "exports"
+        ]
+      },
       "properties": {
         "artifact_sha256": {
           "type": "string",
@@ -50,8 +69,16 @@
           "type": "string",
           "maxLength": 16384
         },
+        "exports": {
+          "$ref": "#/$defs/interfaces",
+          "description": "The component's top-level exports whose kind is an instance."
+        },
         "host": {
           "$ref": "#/$defs/host"
+        },
+        "imports": {
+          "$ref": "#/$defs/interfaces",
+          "description": "Every top-level import of the component."
         },
         "outcome": {
           "enum": [
@@ -65,8 +92,17 @@
           "minLength": 1,
           "maxLength": 256
         },
+        "runner_as_of": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "format": "date"
+        },
         "schema_version": {
-          "const": 1
+          "enum": [
+            1,
+            2,
+            3
+          ]
         }
       },
       "additionalProperties": false,
@@ -99,6 +135,43 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "schema_version": {
+                "const": 1
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "runner_as_of"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "runner_as_of"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "schema_version": {
+                "const": 3
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "imports"
+              ]
+            }
+          }
         }
       ]
     }
@@ -118,6 +191,11 @@
     "observed_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "release_sha256": {
+      "description": "OCI root digest of the release whose platform layer the report checked.",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
     },
     "report": {
       "$ref": "#/$defs/report"

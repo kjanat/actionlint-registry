@@ -21,6 +21,14 @@
           "record",
           "version"
         ],
+        "dependentRequired": {
+          "exports": [
+            "imports"
+          ],
+          "imports": [
+            "exports"
+          ]
+        },
         "properties": {
           "compatibility": {
             "description": "Independent host observations; an empty list means untested.",
@@ -56,6 +64,14 @@
               },
               "additionalProperties": false
             }
+          },
+          "exports": {
+            "$ref": "compatibility.schema.json#/$defs/interfaces",
+            "description": "The component release's top-level exports whose kind is an instance."
+          },
+          "imports": {
+            "$ref": "compatibility.schema.json#/$defs/interfaces",
+            "description": "Every top-level import of the component release, spelled as in the binary. Present together with exports when every observation of the release agrees."
           },
           "record": {
             "type": "string",

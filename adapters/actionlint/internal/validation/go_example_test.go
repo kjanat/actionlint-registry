@@ -6,7 +6,7 @@ import (
 )
 
 func TestPackagedGoExample(t *testing.T) {
-	result, err := Validate(t.Context(), hostFixture(t, "component-insecure-download"))
+	result, err := Validate(t.Context(), testAsOf, hostFixture(t, "component-insecure-download"))
 	if err != nil {
 		t.Fatal(err)
 	}

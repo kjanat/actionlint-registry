@@ -13,28 +13,23 @@ import (
 	"slices"
 	"strings"
 
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
+	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
+	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
 
-	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
-	runner "actionlint.kjanat.dev/v2/internal/model/runners/contract"
+	"actionlint.kjanat.dev/v2/internal/model/rule"
+	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
 )
 
 // ErrUnsupportedContract identifies a contract version this checker does not implement.
 var ErrUnsupportedContract = errors.New("contract is not supported by this checker")
 
-const componentInterface = "kjanat:actionlint/analyzer@0.2.0"
-const scriptInterface = "kjanat:actionlint/script-engine@0.2.0"
-const scriptInterface03 = "kjanat:actionlint/script-engine@0.3.0"
-const runnerInterface = "kjanat:actionlint/runner-provider@0.2.0"
-
-func supportedComponent(iface string) bool {
-	switch iface {
-	case componentInterface, scriptInterface, scriptInterface03, runnerInterface:
-		return true
-	default:
-		return false
+func admitComponent(ctx context.Context, data []byte) (component.Roles, error) {
+	roles, err := component.Admit(ctx, component.ComponentBytes(data))
+	if errors.Is(err, component.ErrUnprovidedInterface) {
+		return roles, fmt.Errorf("%w: %w", ErrUnsupportedContract, err)
 	}
+	return roles, err
 }
 
 // componentDeclaration compares embedded metadata with the host's rule declaration.
@@ -48,7 +43,7 @@ type runnerDeclaration struct {
 	Targets []string `json:"targets"`
 }
 
-func (declared runnerDeclaration) matches(actual runner.Descriptor) error {
+func (declared runnerDeclaration) matches(actual runnerapi.Descriptor) error {
 	declaredTargets := slices.Sorted(slices.Values(declared.Targets))
 	actualTargets := slices.Sorted(slices.Values(actual.Targets))
 	if declared.Name != actual.Name || declared.Version != actual.Version || !slices.Equal(declaredTargets, actualTargets) {
@@ -80,6 +75,7 @@ type embeddedMetadata struct {
 	Transport       string `json:"transport"`
 	Interface       string `json:"interface"`
 	WITSHA256       string `json:"wit_sha256"`
+	LegacyWITSHA256 string `json:"contract_sha256"`
 	Interfaces      map[string][]struct {
 		Version int    `json:"version"`
 		Export  string `json:"export"`
@@ -91,7 +87,7 @@ type embeddedMetadata struct {
 	Descriptor   json.RawMessage `json:"descriptor"`
 }
 
-func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMetadata, error) {
+func inspectMetadata(ctx context.Context, info pluginartifact.ArtifactProvenance) (embeddedMetadata, error) {
 	var metadata embeddedMetadata
 	if len(info.Metadata) == 0 {
 		return metadata, errors.New("registry admission requires a top-level actionlint.plugin custom section")
@@ -112,19 +108,24 @@ func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMet
 		}
 	case pluginartifact.Component:
 		var contract struct {
-			Transport string `json:"transport"`
-			Interface string `json:"interface"`
-			Digest    string `json:"wit_sha256"`
+			Transport    string `json:"transport"`
+			Interface    string `json:"interface"`
+			Digest       string `json:"wit_sha256"`
+			LegacyDigest string `json:"contract_sha256"`
 		}
 		if err := jsonv2.Unmarshal(info.Metadata, &contract); err != nil {
 			return metadata, fmt.Errorf("component contract declaration: %w", err)
 		}
-		if contract.Transport != "wasm-component" || !supportedComponent(contract.Interface) {
+		if contract.Transport != "wasm-component" {
 			return metadata, ErrUnsupportedContract
 		}
+		if contract.Digest != "" && contract.LegacyDigest != "" {
+			return metadata, errors.New("component metadata declares both wit_sha256 and contract_sha256")
+		}
+		digest := contract.Digest + contract.LegacyDigest
 		// Source hashes change with WIT comments. The host checks actual types;
 		// the declaration's digest identifies the publisher's source contract.
-		if _, err := hex.DecodeString(contract.Digest); err != nil || len(contract.Digest) != 64 || strings.ToLower(contract.Digest) != contract.Digest {
+		if _, err := hex.DecodeString(digest); err != nil || len(digest) != 64 || strings.ToLower(digest) != digest {
 			return metadata, errors.New("component contract digest must be a lowercase SHA-256")
 		}
 	default:
@@ -170,16 +171,6 @@ func inspectMetadata(ctx context.Context, info pluginartifact.Info) (embeddedMet
 			}
 		}
 	case pluginartifact.Component:
-		switch metadata.Interface {
-		case componentInterface:
-			if _, err := decodeDescriptor[componentDeclaration](metadata.Descriptor); err != nil {
-				return metadata, err
-			}
-		case runnerInterface:
-			if _, err := decodeDescriptor[runnerDeclaration](metadata.Descriptor); err != nil {
-				return metadata, err
-			}
-		}
 	default:
 		return metadata, errors.New("unsupported artifact kind")
 	}
@@ -190,7 +181,7 @@ func (metadata embeddedMetadata) contract() string {
 	if metadata.Transport == "wasm-core-json" {
 		return "wasm-core-json/1"
 	}
-	return metadata.Interface + "#sha256=" + metadata.WITSHA256
+	return metadata.Interface + "#sha256=" + metadata.WITSHA256 + metadata.LegacyWITSHA256
 }
 
 func (declared *componentDeclaration) matches(actual checkinputs.Descriptor) error {

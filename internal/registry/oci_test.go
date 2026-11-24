@@ -13,11 +13,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"registry.actionlint.kjanat.dev/internal/artifact"
+	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
 
 func processBody() []byte {
@@ -37,7 +39,11 @@ func ociFixture(t *testing.T, variants ...[]byte) (*OCIInspector, string, map[st
 	objects["/v2/plugins/example/blobs/"+configDescriptor.Digest] = config
 	var manifests []ociDescriptor
 	for _, primary := range variants {
-		primaryDescriptor := descriptor(ociProcess, primary)
+		media := ociProcess
+		if bytes.HasPrefix(primary, []byte("\x00asm")) {
+			media = ociWASM
+		}
+		primaryDescriptor := descriptor(media, primary)
 		objects["/v2/plugins/example/blobs/"+primaryDescriptor.Digest] = primary
 		data, err := json.Marshal(ociDocument{SchemaVersion: 2, MediaType: ociManifest, Config: &configDescriptor, Layers: []ociDescriptor{primaryDescriptor}})
 		if err != nil {
@@ -262,7 +268,7 @@ func TestOCIForgeTagIdentityWithoutRelease(t *testing.T) {
 			receipt := sampleReceipt()
 			receipt.Submission = submission
 			receipt.Identity.Issuer = issuer(forge)
-			service := Service{Providers: map[string]ReleaseProvider{forge: provider}, InspectOCI: func(context.Context, string) (artifact.Declaration, error) {
+			service := Service{Providers: map[string]ReleaseProvider{forge: provider}, InspectOCI: func(context.Context, string, OCILayer) (artifact.Declaration, error) {
 				t.Fatal("forged identity reached inspection")
 				return artifact.Declaration{}, nil
 			}}
@@ -317,7 +323,7 @@ func TestProcessReleaseAssetAdmission(t *testing.T) {
 			entry := Entry{Submission: receipt.Submission, RepositoryID: 10, OwnerID: 5, ReleaseID: 20, AssetID: 30, Commit: receipt.Identity.Commit, PublishedAt: time.Now().UTC(), UpstreamImmutable: true, URL: assetURL(receipt.Submission)}
 			service := Service{Providers: map[string]ReleaseProvider{"github": processReleaseProvider{entry: entry, data: data}}}
 			index := EmptyIndex()
-			admitted, err := service.Admit(t.Context(), &index, receipt)
+			admitted, err := admitEntry(service.Admit(t.Context(), &index, receipt))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -373,8 +379,8 @@ func TestOCISharedRepositoryKeepsPackageVersionsImmutable(t *testing.T) {
 		entry.ReleaseID, entry.AssetID = 0, 0
 		entry.UpstreamImmutable = false
 		entry.URL = reference
-		service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Inspect}
-		return service.Admit(t.Context(), &index, receipt)
+		service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Walk}
+		return admitEntry(service.Admit(t.Context(), &index, receipt))
 	}
 	const firstID = "github.com/publisher/plugin/tools/first"
 	first, err := admit(firstID, "example")
@@ -406,9 +412,9 @@ func TestOCIAdmissionIdentityAndImmutability(t *testing.T) {
 	entry.ReleaseID, entry.AssetID = 0, 0
 	entry.UpstreamImmutable = false
 	entry.URL = reference
-	service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Inspect}
+	service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Walk}
 	index := EmptyIndex()
-	admitted, err := service.Admit(t.Context(), &index, receipt)
+	admitted, err := admitEntry(service.Admit(t.Context(), &index, receipt))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,5 +475,243 @@ func TestProcessAssetInspectionAndCandidate(t *testing.T) {
 	}
 	if _, err := ExportCandidate(t.Context(), path, filepath.Join(t.TempDir(), "catalogue"), EmptyIndex()); err == nil {
 		t.Fatal("unbundled transform accepted")
+	}
+}
+
+func ociCandidate(t *testing.T) Entry {
+	t.Helper()
+	inspector, reference, _ := ociFixture(t, processBody())
+	distribution, err := OCIReference(reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := sampleReceipt()
+	receipt.Submission = Submission{SchemaVersion: 2, Provider: "github", Repository: "publisher/plugin", Tag: "v1.0.0", Kind: "manifest", Artifact: distribution}
+	entry := acceptedFixture(t)
+	entry.Submission = receipt.Submission
+	entry.ReleaseID, entry.AssetID = 0, 0
+	entry.UpstreamImmutable = false
+	entry.URL = reference
+	service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Walk}
+	index := EmptyIndex()
+	admitted, err := admitEntry(service.Admit(t.Context(), &index, receipt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return admitted
+}
+
+func layerObservation(entry Entry, layer string) compatibility.Evidence {
+	evidence := observation(entry, "passed")
+	evidence.Report.ArtifactSHA256, evidence.ReleaseSHA256 = layer, entry.Submission.Digest()
+	return evidence
+}
+
+func TestMergeCandidateRequiresEvidence(t *testing.T) {
+	release := acceptedFixture(t)
+	oci := ociCandidate(t)
+	for name, test := range map[string]struct {
+		entry    Entry
+		evidence []compatibility.Evidence
+		merged   bool
+	}{
+		"oci without evidence":     {oci, nil, false},
+		"oci with layer evidence":  {oci, []compatibility.Evidence{layerObservation(oci, strings.Repeat("d", 64)), layerObservation(oci, strings.Repeat("e", 64))}, true},
+		"release without evidence": {release, nil, false},
+		"release with evidence":    {release, []compatibility.Evidence{observation(release, "passed")}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			store := Store{Directory: filepath.Join(directory, "plugins")}
+			evidence := EvidenceStore{Directory: filepath.Join(directory, "compatibility")}
+			candidate := EmptyIndex()
+			if err := candidate.Add(test.entry); err != nil {
+				t.Fatal(err)
+			}
+			err := MergeCandidate(store, candidate, test.evidence, evidence)
+			loaded, loadErr := store.Load()
+			if loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			if !test.merged {
+				if err == nil || FailureDisposition(err) != "rejected" || len(loaded.Entries) != 0 {
+					t.Fatalf("version without evidence merged or retried: %v, %d entries", err, len(loaded.Entries))
+				}
+				return
+			}
+			if err != nil || len(loaded.Entries) != 1 {
+				t.Fatalf("merge failed: %v, %d entries", err, len(loaded.Entries))
+			}
+			stored, err := evidence.Load(loaded)
+			if err != nil || len(stored) != len(test.evidence) {
+				t.Fatalf("merge stored %d evidence records, want %d: %v", len(stored), len(test.evidence), err)
+			}
+		})
+	}
+}
+
+const otherPlatformLayer = "other-platform"
+
+func customSection(name, payload string) []byte {
+	body := append([]byte{byte(len(name))}, name...)
+	body = append(body, payload...)
+	section := []byte{0}
+	for size := len(body); ; size >>= 7 {
+		if size < 128 {
+			section = append(section, byte(size))
+			break
+		}
+		section = append(section, byte(size&127)|128)
+	}
+	return append(section, body...)
+}
+
+func componentLayer(platform string) []byte {
+	layer := []byte("\x00asm\x0d\x00\x01\x00")
+	layer = append(layer, customSection("actionlint.plugin", componentMetadata("oci"))...)
+	return append(layer, customSection("registry-test.platform", platform)...)
+}
+
+func ociComponentRelease(t *testing.T, layers ...[]byte) (Service, Receipt, *OCIInspector) {
+	t.Helper()
+	inspector, reference, _ := ociFixture(t, layers...)
+	distribution, err := OCIReference(reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := sampleReceipt()
+	receipt.Submission = Submission{SchemaVersion: 2, Provider: "github", Repository: "publisher/plugin", Tag: "v1.0.0", Kind: "component", Artifact: distribution}
+	entry := acceptedFixture(t)
+	entry.Submission = receipt.Submission
+	entry.ReleaseID, entry.AssetID = 0, 0
+	entry.UpstreamImmutable = false
+	entry.URL = reference
+	return Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Walk, Checker: checker}, receipt, inspector
+}
+
+func TestOCIReleaseEvidenceCoversEveryPlatformLayer(t *testing.T) {
+	linux, darwin := componentLayer("linux"), componentLayer("darwin")
+	service, receipt, inspector := ociComponentRelease(t, linux, darwin)
+	index := EmptyIndex()
+	admission, err := service.Admit(t.Context(), &index, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layers := []string{descriptor(ociWASM, linux).Digest, descriptor(ociWASM, darwin).Digest}
+	if len(admission.Evidence) != 2 {
+		t.Fatalf("admission recorded %d observations for 2 platform layers", len(admission.Evidence))
+	}
+	for i, evidence := range admission.Evidence {
+		if evidence.ReleaseSHA256 != receipt.Submission.Digest() || "sha256:"+evidence.Report.ArtifactSHA256 != layers[i] || evidence.Report.Outcome != "passed" {
+			t.Fatalf("observation %d does not bind layer %s to release %s: %+v", i, layers[i], receipt.Submission.Digest(), evidence)
+		}
+	}
+	store := EvidenceStore{Directory: filepath.Join(t.TempDir(), "compatibility")}
+	for _, evidence := range admission.Evidence {
+		if err = store.Add(index, evidence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored, err := store.Load(index)
+	if err != nil || len(stored) != 2 {
+		t.Fatalf("stored %d observations: %v", len(stored), err)
+	}
+	version := exportedVersion(t, index, stored)
+	var imports, exports []string
+	if err = errors.Join(json.Unmarshal(version["imports"], &imports), json.Unmarshal(version["exports"], &exports)); err != nil || !slices.Equal(imports, []string{"wasi:cli/environment@0.2.0"}) || !slices.Equal(exports, []string{"kjanat:actionlint/analyzer@0.2.0"}) {
+		t.Fatalf("agreeing platforms lost their interfaces: %s %s: %v", version["imports"], version["exports"], err)
+	}
+	var links []CompatibilityLink
+	if err = json.Unmarshal(version["compatibility"], &links); err != nil || len(links) != 2 {
+		t.Fatalf("compatibility links %s: %v", version["compatibility"], err)
+	}
+
+	rechecked, err := store.Recheck(t.Context(), index, service.Checker, admission.Entry.PinnedURL(), admission.Entry, inspector.Walk)
+	if err != nil || len(rechecked) != 2 {
+		t.Fatalf("recheck observed %d layers: %v", len(rechecked), err)
+	}
+	if _, err = store.Recheck(t.Context(), index, service.Checker, admission.Entry.PinnedURL()+"x", admission.Entry, inspector.Walk); err == nil {
+		t.Fatal("recheck accepted a reference other than the release's")
+	}
+	unbound := admission.Evidence[0]
+	unbound.ReleaseSHA256 = ""
+	unbound.Report.ArtifactSHA256 = receipt.Submission.Digest()
+	if err = store.Add(index, unbound); err == nil {
+		t.Fatal("stored OCI evidence that names no checked layer")
+	}
+}
+
+func TestOCIPlatformsDisagreeingOnInterfacesPublishNone(t *testing.T) {
+	service, receipt, _ := ociComponentRelease(t, componentLayer("linux"), componentLayer(otherPlatformLayer))
+	index := EmptyIndex()
+	admission, err := service.Admit(t.Context(), &index, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(admission.Evidence) != 2 || slices.Equal(admission.Evidence[0].Report.Exports, admission.Evidence[1].Report.Exports) {
+		t.Fatalf("fixture platforms agree: %+v", admission.Evidence)
+	}
+	version := exportedVersion(t, index, admission.Evidence)
+	if _, found := version["imports"]; found {
+		t.Fatalf("published imports for disagreeing platforms: %s", version["imports"])
+	}
+	if _, found := version["exports"]; found {
+		t.Fatalf("published exports for disagreeing platforms: %s", version["exports"])
+	}
+}
+
+func TestReleaseAssetEvidenceCannotNameARelease(t *testing.T) {
+	entry := acceptedFixture(t)
+	index := EmptyIndex()
+	if err := index.Add(entry); err != nil {
+		t.Fatal(err)
+	}
+	evidence := observation(entry, "passed")
+	evidence.ReleaseSHA256, evidence.Report.ArtifactSHA256 = entry.Submission.Digest(), strings.Repeat("d", 64)
+	if err := (EvidenceStore{Directory: filepath.Join(t.TempDir(), "compatibility")}).Add(index, evidence); err == nil {
+		t.Fatal("stored layer evidence for a release asset")
+	}
+}
+
+func TestOCIPlatformsMustShareMetadata(t *testing.T) {
+	header := []byte("\x00asm\x0d\x00\x01\x00")
+	layer := func(metadata, platform string) []byte {
+		data := append(slices.Clone(header), customSection("actionlint.plugin", metadata)...)
+		return append(data, customSection("registry-test.platform", platform)...)
+	}
+	metadata := componentMetadata("oci")
+	reordered := strings.Replace(metadata, `{"metadata_version":1,`, `{`, 1)
+	reordered = strings.TrimSuffix(reordered, "}") + `,"metadata_version":1}`
+	inspector, reference, _ := ociFixture(t, layer(metadata, "linux"), layer(reordered, "darwin"))
+	if _, err := inspector.Inspect(t.Context(), reference); err != nil {
+		t.Fatalf("platforms whose metadata differs only in member order were rejected: %v", err)
+	}
+	inspector, reference, _ = ociFixture(t, layer(metadata, "linux"), layer(componentMetadata("darwin"), "darwin"))
+	if _, err := inspector.Inspect(t.Context(), reference); err == nil || FailureDisposition(err) != "rejected" || !strings.Contains(err.Error(), "metadata") {
+		t.Fatalf("platforms with different metadata were accepted: %v", err)
+	}
+}
+
+func TestOCIPlatformWithoutListsPublishesNone(t *testing.T) {
+	service, receipt, _ := ociComponentRelease(t, componentLayer("linux"), componentLayer("darwin"))
+	index := EmptyIndex()
+	admission, err := service.Admit(t.Context(), &index, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlisted := admission.Evidence[1]
+	unlisted.Report.Outcome, unlisted.Report.Detail = "failed", "validate component contract: newer parser rejects this platform"
+	unlisted.Report.Imports, unlisted.Report.Exports = nil, nil
+	unlisted.Report.ArtifactSHA256 = strings.Repeat("f", 64)
+	version := exportedVersion(t, index, []compatibility.Evidence{admission.Evidence[0], unlisted})
+	if _, found := version["imports"]; found {
+		t.Fatalf("published imports although one platform has no lists: %s", version["imports"])
+	}
+	if _, found := version["exports"]; found {
+		t.Fatalf("published exports although one platform has no lists: %s", version["exports"])
 	}
 }

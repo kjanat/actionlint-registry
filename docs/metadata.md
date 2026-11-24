@@ -38,8 +38,9 @@ contract. Admission does not require the registry's checker to support that ABI.
 
 ## Components
 
-Set `transport` to `"wasm-component"`, `interface` to the interface identity, and
-`wit_sha256` to the lowercase SHA-256 checksum of the canonical WIT.
+Set `transport` to `"wasm-component"`, `interface` to the identity of one of the
+component's top-level instance exports, and `wit_sha256` to the lowercase SHA-256
+checksum of the canonical WIT.
 Admission rejects `contract_sha256`.
 These are declarations. A compatible host's checker verifies the exported types;
 admission reads the declaration without instantiating the component.
@@ -68,12 +69,16 @@ For example, a component can declare:
 The checksum above is illustrative. Unknown contracts are catalogued without a
 compatibility claim.
 
-For `kjanat:actionlint/runner-provider@0.2.0`, `descriptor` contains the provider's
-`name`, `version` and `targets` from its runtime `describe()` result. The Wasm
-compatibility adapter compares all three fields and exercises the provider with
-a missing snapshot. Targets describe supported platforms, so their order does
-not affect the comparison. The package `id`, display `name` and `plugin_version`
-identify the distributed release and may differ from the provider descriptor.
+For `kjanat:actionlint/runner-provider@0.2.0` and `@0.3.0`, `descriptor` contains
+the provider's `name`, `version` and `targets` from its runtime `describe()`
+result. The Wasm compatibility adapter compares all three fields and exercises
+the provider with a missing snapshot through actionlint's own runner resolution,
+which rejects invalid answers and support catalogues. Targets describe supported
+platforms, so their order does not affect the comparison. The package `id`,
+display `name` and `plugin_version` identify the distributed release and may
+differ from the provider descriptor. The adapter rejects a provider that takes the
+name of an actionlint built-in provider for one of that built-in's targets, such
+as `github` or `snapshot` for the `github` target; actionlint never selects it there.
 
 ## Process manifests
 
@@ -148,7 +153,57 @@ The versioned [JSON report protocol](../schemas/compatibility.schema.json) recor
 `passed`, `failed`, or `unsupported` for a particular artifact, host revision, and
 policy. A checker crash produces no compatibility evidence. Missing evidence means
 untested. Admission and the shared candidate check reject `failed`; `unsupported`
-is admitted. No outcome changes an existing release record.
+is admitted. No outcome changes an existing release record. Admission stores its
+report under `registry/compatibility` together with the accepted record. With
+`--candidate`, `admit` writes the report to the candidate's sibling
+`compatibility` directory unless `--compatibility` names another. `merge` rejects
+a new version that has no report in `--candidate-compatibility`.
+
+For an OCI release or candidate, admission, `check` and the shared candidate check
+run the checker on the primary layer of each platform. Each report names the layer
+it hashed in `artifact_sha256`, and its record names the root manifest digest in
+`release_sha256`. Pass the pinned `oci://` reference as `check --artifact`, and add
+`--oci-layout` to read the graph from a local image layout. With `--plugin` and
+`--version`, the reference must equal the accepted release's reference, and the
+registry stores and links the records under its root digest. Without them, `check`
+prints one record per line, and `--report` writes the records as a JSON array.
+Inspection rejects an OCI release whose platform layers carry different embedded
+metadata, compared as canonical JSON. actionlint installs a platform only when its
+metadata equals the release's.
+
+Before each check the registry runs the checker with `--protocol`, with a
+5-second limit. A protocol 2 or 3 checker prints its version; a protocol 1
+checker treats the argument as a missing artifact, exits with status 1 and prints
+nothing. A probe that times out, ends by a signal or exits with any other status,
+such as a Go panic's 2, fails the check. Protocol 2 and 3 reports carry a
+required `runner_as_of`, the runner assessment date the checker used. The
+registry passes every protocol 2 and 3 checker `--runner-as-of`.
+`check --plugin --version` passes the date of the version's earliest dated
+record. Admission, unpublished checks and versions without a dated record pass
+the current UTC date, taken before the checker starts. The registry rejects a
+report whose date differs from the date it passed. A protocol 1 checker receives
+no date and its records stay undated.
+
+A protocol 3 report on a component can list the component's `imports` and
+`exports`. `imports` holds every top-level import name, spelled exactly as in the
+binary. `exports` holds the top-level exports whose kind is an instance. A report
+carries both lists or neither. Export copies both lists into the component's
+version entry in its plugin `index.json`:
+
+```json
+{
+  "version": "v1.2.0",
+  "record": "versions/<sha256(tag)>.json",
+  "compatibility": [],
+  "imports": ["kjanat:actionlint/invocation-context@0.2.0"],
+  "exports": ["kjanat:actionlint/analyzer@0.2.0"]
+}
+```
+
+The entry omits both lists when a checked file, such as one OCI platform layer, has
+no report that lists them, or when the reports disagree, as OCI platform layers
+with different exports do. actionlint then checks the downloaded bytes. Running `check --plugin --version` with a
+protocol 3 checker over a published version adds the lists to its entry.
 
 For release preparation, the [shared candidate check](publishing.md) also installs
 the exact local bytes through actionlint and executes a publisher-supplied fixture.

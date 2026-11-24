@@ -39,7 +39,7 @@ func ExportCandidate(ctx context.Context, input, output string, existing Index) 
 // later publication; testing the snapshot needs no network or registry writes.
 func ExportLayoutCandidate(ctx context.Context, reference, layout, output string, existing Index) (Candidate, error) {
 	return exportCandidate(ctx, reference, output, existing, func(ctx context.Context, input, staging string) (artifact.Declaration, error) {
-		return inspectLayout(ctx, input, layout, filepath.Join(staging, "oci-blobs"))
+		return inspectLayout(ctx, input, layout, filepath.Join(staging, "oci-blobs"), nil)
 	})
 }
 

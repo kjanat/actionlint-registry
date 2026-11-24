@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
-	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	"actionlint.kjanat.dev/v2/internal/development/tests/testutil/wasmcomponent"
+	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
+	"actionlint.kjanat.dev/v2/internal/model/rule"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
 )
 
@@ -74,7 +75,7 @@ func TestAdmissionRequiresEmbeddedMetadata(t *testing.T) {
 		if err := os.WriteFile(path, unpackagedFixture(t, name), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := Validate(t.Context(), path)
+		_, err := Validate(t.Context(), testAsOf, path)
 		if err == nil || !strings.Contains(err.Error(), "custom section") {
 			t.Fatalf("%s: expected missing metadata, got %v", name, err)
 		}
@@ -88,7 +89,7 @@ func TestEmbeddedComponentDescriptorMustMatchRuntime(t *testing.T) {
 		strings.Replace(componentMetadata, `"scripts","invocations"`, `"scripts","dependencies"`, 1),
 		strings.Replace(componentMetadata, `"options_schema":{}`, `"options_schema":{"type":"object"}`, 1),
 	} {
-		_, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata))
+		_, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata))
 		if err == nil || !strings.Contains(err.Error(), "differs from runtime") {
 			t.Fatalf("expected static/runtime mismatch, got %v", err)
 		}
@@ -97,7 +98,7 @@ func TestEmbeddedComponentDescriptorMustMatchRuntime(t *testing.T) {
 
 func TestComponentPackageIdentityDiffersFromRuleName(t *testing.T) {
 	metadata := strings.Replace(componentMetadata, `"id":"no-sudo"`, `"id":"example/package"`, 1)
-	result, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata))
+	result, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +109,7 @@ func TestComponentPackageIdentityDiffersFromRuleName(t *testing.T) {
 
 func TestPreservesCompleteEmbeddedMetadata(t *testing.T) {
 	metadata := strings.Replace(componentMetadata, `"metadata_version":1`, `"metadata_version":1,"publisher_extra":{"nested":["preserved",123]}`, 1)
-	result, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata))
+	result, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,7 @@ func TestPreservesCompleteEmbeddedMetadata(t *testing.T) {
 
 func TestMalformedMetadataSectionsRejected(t *testing.T) {
 	for _, metadata := range []string{`null`, `{`, `{"id":"a","id":"b"}`, strings.Repeat(" ", (1<<20)+1)} {
-		if _, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata)); err == nil {
+		if _, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata)); err == nil {
 			t.Fatal("invalid or oversized custom section accepted")
 		}
 	}
@@ -128,7 +129,7 @@ func TestMalformedMetadataSectionsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Validate(t.Context(), appendFixtureMetadata(t, module, componentMetadata)); err == nil || !strings.Contains(err.Error(), "duplicate") {
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, module, componentMetadata)); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("duplicate custom section: %v", err)
 	}
 }
@@ -144,7 +145,7 @@ func TestCoreStaticRuntimeMismatch(t *testing.T) {
 	if err := os.WriteFile(path, module, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Validate(t.Context(), path); err == nil || !strings.Contains(err.Error(), "metadata") {
+	if _, err := Validate(t.Context(), testAsOf, path); err == nil || !strings.Contains(err.Error(), "metadata") {
 		t.Fatalf("core static/runtime mismatch: %v", err)
 	}
 }
@@ -162,12 +163,12 @@ func TestEmptyRequiredInputsAreEquivalent(t *testing.T) {
 }
 
 func TestUnknownContractCheckedBeforeHostSpecificFields(t *testing.T) {
-	for _, info := range []pluginartifact.Info{
-		{Kind: pluginartifact.Component, Metadata: []byte(`{"transport":"wasm-component","interface":"example:future/analyzer@2.0.0","wit_sha256":"future","abi_version":{"unrelated":"extension"},"descriptor":{"requires":{"new":"shape"}}}`)},
-		{Kind: pluginartifact.Core, Metadata: []byte(`{"transport":"wasm-core-json","abi_version":999,"interface":{"unrelated":"extension"},"interfaces":{"check":"new-shape"}}`)},
-	} {
-		if _, err := inspectMetadata(t.Context(), info); !errors.Is(err, ErrUnsupportedContract) {
-			t.Fatalf("unknown contract became runtime failure: %v", err)
-		}
+	core := pluginartifact.ArtifactProvenance{Kind: pluginartifact.Core, Metadata: []byte(`{"transport":"wasm-core-json","abi_version":999,"interface":{"unrelated":"extension"},"interfaces":{"check":"new-shape"}}`)}
+	if _, err := inspectMetadata(t.Context(), core); !errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("unknown core contract became runtime failure: %v", err)
+	}
+	future := wasmcomponent.Build(nil, []string{"example:future/analyzer@2.0.0"}, nil)
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, future, `{"transport":"wasm-component","interface":"example:future/analyzer@2.0.0","wit_sha256":"future","abi_version":{"unrelated":"extension"},"descriptor":{"requires":{"new":"shape"}}}`)); !errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("unknown component contract became runtime failure: %v", err)
 	}
 }

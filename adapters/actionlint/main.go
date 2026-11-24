@@ -6,14 +6,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
 	"actionlint.kjanat.dev/v2/registry/validation/internal/validation"
 )
+
+const protocolVersion = 3
 
 type host struct {
 	Name     string `json:"name"`
@@ -26,7 +31,10 @@ type report struct {
 	Policy         string   `json:"policy"`
 	Outcome        string   `json:"outcome"`
 	Checks         []string `json:"checks"`
+	RunnerAsOf     string   `json:"runner_as_of"`
 	Detail         string   `json:"detail,omitempty"`
+	Imports        []string `json:"imports,omitzero"`
+	Exports        []string `json:"exports,omitzero"`
 }
 
 func main() {
@@ -38,13 +46,32 @@ func main() {
 	}
 }
 func run(ctx context.Context, args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: actionlint-checker <local-artifact>")
+	flags := flag.NewFlagSet("actionlint-checker", flag.ContinueOnError)
+	asOfFlag := flags.String("runner-as-of", "", "Runner assessment date (YYYY-MM-DD); defaults to the current UTC date")
+	protocolFlag := flags.Bool("protocol", false, "Print the report protocol version and exit")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *protocolFlag && *asOfFlag == "" && flags.NArg() == 0 {
+		_, err := fmt.Println(protocolVersion)
+		return err
+	}
+	if *protocolFlag || flags.NArg() != 1 {
+		return errors.New("usage: actionlint-checker --protocol | [--runner-as-of YYYY-MM-DD] <local-artifact>")
+	}
+	asOf := lifecycle.DateOf(time.Now())
+	if *asOfFlag != "" {
+		parsed, err := lifecycle.ParseDate(*asOfFlag)
+		if err != nil {
+			return fmt.Errorf("--runner-as-of: %w", err)
+		}
+		asOf = parsed
 	}
 	if validation.HostCommit == "" {
 		return errors.New("checker build lacks the actionlint host module revision")
 	}
-	file, err := os.Open(args[0])
+	path := flags.Arg(0)
+	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
@@ -56,8 +83,15 @@ func run(ctx context.Context, args []string) error {
 	if size > 64<<20 {
 		return errors.New("artifact exceeds 64 MiB")
 	}
-	reply := report{SchemaVersion: 1, ArtifactSHA256: hex.EncodeToString(hash.Sum(nil)), Host: host{Name: "actionlint", Revision: validation.HostCommit}, Policy: "actionlint-smoke/1", Outcome: "passed", Checks: []string{}}
-	result, err := validation.Validate(ctx, args[0])
+	reply := report{SchemaVersion: protocolVersion, ArtifactSHA256: hex.EncodeToString(hash.Sum(nil)), Host: host{Name: "actionlint", Revision: validation.HostCommit}, Policy: "actionlint-smoke/1", Outcome: "passed", Checks: []string{}, RunnerAsOf: asOf.String()}
+	opened, err := validation.Open(ctx, path)
+	var result validation.Result
+	if err == nil {
+		if opened.Interfaces != nil {
+			reply.Imports, reply.Exports = opened.Interfaces.Imports, opened.Interfaces.Exports
+		}
+		result, err = opened.Validate(ctx, asOf)
+	}
 	if err != nil {
 		reply.Outcome = "failed"
 		if errors.Is(err, validation.ErrUnsupportedContract) {

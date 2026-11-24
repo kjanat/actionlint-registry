@@ -6,20 +6,21 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
-	sourcepos "actionlint.kjanat.dev/v2/internal/input/source"
+	"actionlint.kjanat.dev/v2/internal/base/sourcetext"
+	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
+	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
 	results "actionlint.kjanat.dev/v2/internal/results"
 )
 
-func validRange(content string, start, end sourcepos.Position) bool {
+func validRange(content string, start, end sourcetext.Position) bool {
 	lines := strings.Split(content, "\n")
-	valid := func(p sourcepos.Position) bool {
+	valid := func(p sourcetext.Position) bool {
 		return p.Line > 0 && p.Line <= len(lines) && p.Column > 0 && p.Column <= utf8.RuneCountInString(lines[p.Line-1])+1
 	}
 	return valid(start) && valid(end) && (start.Line < end.Line || start.Line == end.Line && start.Column <= end.Column)
 }
 
-func scriptFindings(findings []checkinputs.ScriptDiagnostic, request checkinputs.ScriptRequest) error {
+func scriptFindings(findings []scriptengine.Diagnostic, request scriptengine.Request) error {
 	if len(findings) > 4096 {
 		return errors.New("the sample produced more than 4096 diagnostics")
 	}
@@ -27,15 +28,14 @@ func scriptFindings(findings []checkinputs.ScriptDiagnostic, request checkinputs
 		if d.Filename != request.Filename || d.Message == "" || !boundedText(d.Message, 16384) || !boundedText(d.Code, 128) {
 			return errors.New("the script diagnostic has an invalid filename, code, or message")
 		}
-		if !validRange(request.Source, sourcepos.Position{Line: d.Location.Row, Column: d.Location.Column},
-			sourcepos.Position{Line: d.EndLocation.Row, Column: d.EndLocation.Column}) {
+		if !validRange(request.Source, d.Location, d.EndLocation) {
 			return errors.New("the script diagnostic points outside the sample source")
 		}
 	}
 	return nil
 }
 
-func componentFindings(findings []results.Diagnostic, input checkinputs.Input, rules []string) error {
+func componentFindings(findings []results.Diagnostic, input checkinputs.AnalyzerInput, rules []string) error {
 	if len(findings) > 4096 {
 		return errors.New("the sample produced more than 4096 diagnostics")
 	}

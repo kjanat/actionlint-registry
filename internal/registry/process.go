@@ -13,8 +13,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
+	"registry.actionlint.kjanat.dev/internal/artifact"
 	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
 
@@ -34,25 +38,83 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 // CheckCompatibility runs a trusted, explicitly selected checker on a checksum-verified
 // snapshot. It excludes registry credentials but does not provide an OS sandbox.
-func CheckCompatibility(ctx context.Context, executable, path string, entry Entry) (evidence compatibility.Evidence, err error) {
-	if err = entry.Submission.Validate(); err != nil {
-		return evidence, err
+func CheckCompatibility(ctx context.Context, executable, path string, entry Entry, runnerAsOf string, walk OCIWalker) ([]compatibility.Evidence, error) {
+	if err := entry.Submission.Validate(); err != nil {
+		return nil, err
 	}
 	if entry.Submission.IsOCI() {
-		return evidence, errors.New("this checker accepts local package bytes; OCI graph checks are unsupported")
+		if path != entry.Submission.Artifact.Reference() {
+			return nil, errors.New("an OCI release check requires the release's pinned reference as its artifact")
+		}
+		_, evidence, err := CheckOCI(ctx, executable, walk, path, runnerAsOf)
+		return evidence, err
 	}
-	return CheckArtifact(ctx, executable, path, entry.Submission.Digest())
+	evidence, err := CheckArtifact(ctx, executable, path, entry.Submission.Digest(), runnerAsOf)
+	if err != nil {
+		return nil, err
+	}
+	return []compatibility.Evidence{evidence}, nil
+}
+
+func CheckOCI(ctx context.Context, executable string, walk OCIWalker, reference, runnerAsOf string) (declaration artifact.Declaration, observed []compatibility.Evidence, err error) {
+	distribution, err := OCIReference(reference)
+	if err != nil {
+		return declaration, nil, err
+	}
+	dir, err := os.MkdirTemp("", "registry-oci-layers-")
+	if err != nil {
+		return declaration, nil, err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(dir)) }()
+	type layer struct{ digest, path string }
+	var layers []layer
+	declaration, err = walk(ctx, reference, func(digest, mediaType string, data []byte) error {
+		name := strings.TrimPrefix(digest, "sha256:")
+		if slices.ContainsFunc(layers, func(l layer) bool { return l.digest == name }) {
+			return nil
+		}
+		extension := ".wasm"
+		if mediaType == ociProcess {
+			extension = ".json"
+		}
+		path := filepath.Join(dir, name+extension)
+		layers = append(layers, layer{name, path})
+		return os.WriteFile(path, data, 0o600)
+	})
+	if err != nil {
+		return declaration, nil, err
+	}
+	if runnerAsOf == "" {
+		runnerAsOf = time.Now().UTC().Format(time.DateOnly)
+	}
+	for _, checked := range layers {
+		evidence, err := CheckArtifact(ctx, executable, checked.path, checked.digest, runnerAsOf)
+		if err != nil {
+			return declaration, nil, fmt.Errorf("OCI layer sha256:%s: %w", checked.digest, err)
+		}
+		evidence.ReleaseSHA256 = distribution.digest
+		if err = evidence.Validate(); err != nil {
+			return declaration, nil, err
+		}
+		observed = append(observed, evidence)
+	}
+	return declaration, observed, nil
 }
 
 // CheckArtifact observes a local candidate without requiring publication. The
 // caller supplies the inspected digest; the checker receives a verified snapshot.
-func CheckArtifact(ctx context.Context, executable, path, expectedDigest string) (evidence compatibility.Evidence, err error) {
+// A protocol 2 or later checker receives runnerAsOf, or the current UTC date when
+// it is empty, and must report that date. A protocol 1 checker receives no date.
+func CheckArtifact(ctx context.Context, executable, path, expectedDigest, runnerAsOf string) (evidence compatibility.Evidence, err error) {
 	executable, err = filepath.Abs(executable)
 	if err != nil {
 		return evidence, err
 	}
 	if !digestPattern.MatchString(expectedDigest) {
 		return evidence, errors.New("invalid checker input digest")
+	}
+	if runnerAsOf != "" && !compatibility.ValidDate(runnerAsOf) {
+		return evidence, errors.New("invalid runner assessment date")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
@@ -77,28 +139,76 @@ func CheckArtifact(ctx context.Context, executable, path, expectedDigest string)
 	if digest != expectedDigest {
 		return evidence, errors.New("checker input checksum differs from inspected artifact")
 	}
-	cmd := exec.CommandContext(ctx, checkerPath, snapshot)
+	protocol, err := checkerProtocol(ctx, checkerPath, dir)
+	if err != nil {
+		return evidence, err
+	}
+	var args []string
+	if protocol >= 2 {
+		if runnerAsOf == "" {
+			runnerAsOf = time.Now().UTC().Format(time.DateOnly)
+		}
+		args = append(args, "--runner-as-of", runnerAsOf)
+	}
+	stdout := &boundedBuffer{limit: 1 << 20}
+	if err = checkerCommand(ctx, checkerPath, dir, stdout, append(args, snapshot)...).Run(); err != nil {
+		return evidence, fmt.Errorf("checker process: %w", err)
+	}
+	if err = jsonv2.Unmarshal(stdout.Bytes(), &evidence.Report, jsonv2.RejectUnknownMembers(true)); err != nil {
+		return evidence, fmt.Errorf("checker response: %w", err)
+	}
+	evidence.ObservedAt = time.Now().UTC()
+	if evidence.Report.ArtifactSHA256 != expectedDigest {
+		return evidence, errors.New("checker report refers to a different artifact")
+	}
+	if evidence.Report.SchemaVersion != protocol {
+		return evidence, fmt.Errorf("checker answered protocol %d but reported schema_version %d", protocol, evidence.Report.SchemaVersion)
+	}
+	if protocol >= 2 && evidence.Report.RunnerAsOf != runnerAsOf {
+		return evidence, fmt.Errorf("checker used runner assessment date %q instead of %q", evidence.Report.RunnerAsOf, runnerAsOf)
+	}
+	return evidence, evidence.Validate()
+}
+
+var checkerProbeTimeout = 5 * time.Second
+
+// checkerProtocol asks the checker for its protocol version. A protocol 1
+// checker treats the probe as a missing artifact: it exits with status 1 and
+// prints nothing to stdout. A Go panic exits with status 2.
+func checkerProtocol(ctx context.Context, checkerPath, dir string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, checkerProbeTimeout)
+	defer cancel()
+	stdout := &boundedBuffer{limit: 64}
+	err := checkerCommand(ctx, checkerPath, dir, stdout, compatibility.ProtocolProbe).Run()
+	answer := strings.TrimSpace(string(stdout.Bytes()))
+	var exit *exec.ExitError
+	switch {
+	case ctx.Err() != nil:
+		return 0, fmt.Errorf("checker protocol probe did not finish: %w", errors.Join(ctx.Err(), err))
+	case errors.As(err, &exit) && exit.Exited() && exit.ExitCode() == 1 && answer == "":
+		return 1, nil
+	case err != nil:
+		return 0, fmt.Errorf("checker protocol probe failed: %w", err)
+	}
+	for version := 2; version <= compatibility.ProtocolVersion; version++ {
+		if answer == strconv.Itoa(version) {
+			return version, nil
+		}
+	}
+	return 0, fmt.Errorf("unsupported checker protocol %q", answer)
+}
+
+func checkerCommand(ctx context.Context, checkerPath, dir string, stdout io.Writer, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, checkerPath, args...)
 	cmd.Dir = dir
 	cmd.Env = []string{"GOMEMLIMIT=512MiB", "TMPDIR=" + dir, "TMP=" + dir, "TEMP=" + dir}
 	if root, ok := os.LookupEnv("SystemRoot"); ok {
 		cmd.Env = append(cmd.Env, "SystemRoot="+root)
 	}
 	cmd.WaitDelay = time.Second
-	stdout := &boundedBuffer{limit: 1 << 20}
-	stderr := &boundedBuffer{limit: 64 << 10}
 	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err = cmd.Run(); err != nil {
-		return evidence, fmt.Errorf("checker process: %w", err)
-	}
-	if err = jsonv2.Unmarshal(stdout.Bytes(), &evidence.Report, jsonv2.RejectUnknownMembers(true)); err != nil {
-		return evidence, fmt.Errorf("checker response: %w", err)
-	}
-	if evidence.Report.ArtifactSHA256 != expectedDigest {
-		return evidence, errors.New("checker report refers to a different artifact")
-	}
-	evidence.ObservedAt = time.Now().UTC()
-	return evidence, evidence.Validate()
+	cmd.Stderr = &boundedBuffer{limit: 64 << 10}
+	return cmd
 }
 
 // snapshotFile hashes the bytes it copies, so execution cannot race a replacement

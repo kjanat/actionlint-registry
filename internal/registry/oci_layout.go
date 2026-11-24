@@ -15,10 +15,16 @@ import (
 // InspectLayout verifies a pinned OCI package in a standard image layout. It
 // uses the same graph checks as remote inspection and never creates a client.
 func InspectLayout(ctx context.Context, reference, layout string) (artifact.Declaration, error) {
-	return inspectLayout(ctx, reference, layout, "")
+	return inspectLayout(ctx, reference, layout, "", nil)
 }
 
-func inspectLayout(ctx context.Context, reference, layout, snapshot string) (result artifact.Declaration, err error) {
+func LayoutWalker(layout string) OCIWalker {
+	return func(ctx context.Context, reference string, layer OCILayer) (artifact.Declaration, error) {
+		return inspectLayout(ctx, reference, layout, "", layer)
+	}
+}
+
+func inspectLayout(ctx context.Context, reference, layout, snapshot string, primary OCILayer) (result artifact.Declaration, err error) {
 	distribution, err := OCIReference(reference)
 	if err != nil {
 		return artifact.Declaration{}, err
@@ -96,7 +102,7 @@ func inspectLayout(ctx context.Context, reference, layout, snapshot string) (res
 		}
 		return nil
 	}
-	return inspectOCI(ctx, distribution, ociObjects{manifest: readManifest, blob: readFile, verified: verified})
+	return inspectOCI(ctx, distribution, ociObjects{manifest: readManifest, blob: readFile, verified: verified, primary: primary})
 }
 
 func readLayoutFile(ctx context.Context, root *os.Root, path string, limit int64) (data []byte, err error) {

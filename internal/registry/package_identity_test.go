@@ -50,7 +50,7 @@ func TestMonorepoPackageAdmissionAndStorage(t *testing.T) {
 		service := Service{Providers: map[string]ReleaseProvider{"github": packageProvider{entry: candidate}}, Inspect: func(context.Context, string) (artifact.Declaration, error) {
 			return *candidate.Artifact, nil
 		}}
-		admitted, err := service.Admit(t.Context(), &index, candidate.Receipt)
+		admitted, err := admitEntry(service.Admit(t.Context(), &index, candidate.Receipt))
 		if err != nil || admitted.IdentityVersion != 2 || admitted.Name() != candidate.PluginID() {
 			t.Fatalf("package admission: %+v, %v", admitted, err)
 		}
@@ -146,7 +146,7 @@ func TestQualifiedHistoricalIdentityKeepsRepositorySelector(t *testing.T) {
 	}
 	next := changedArtifactFixture(t, legacy, "v2.0.0", "core", "first.wasm")
 	service := Service{Providers: map[string]ReleaseProvider{"github": packageProvider{entry: next}}, Inspect: func(context.Context, string) (artifact.Declaration, error) { return *next.Artifact, nil }}
-	admitted, err := service.Admit(t.Context(), &loaded, next.Receipt)
+	admitted, err := admitEntry(service.Admit(t.Context(), &loaded, next.Receipt))
 	if err != nil || admitted.IdentityVersion != 0 || admitted.Name() != legacy.Name() {
 		t.Fatalf("legacy migration: %+v, %v", admitted, err)
 	}
@@ -191,7 +191,7 @@ func TestPackageCandidateAndProcessAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := Service{Providers: map[string]ReleaseProvider{"github": packageProvider{entry: entry, body: body}}}
-	admitted, err := service.Admit(t.Context(), &index, entry.Receipt)
+	admitted, err := admitEntry(service.Admit(t.Context(), &index, entry.Receipt))
 	if err != nil || admitted.IdentityVersion != 2 || admitted.Name() != id {
 		t.Fatalf("process admission: %+v, %v", admitted, err)
 	}

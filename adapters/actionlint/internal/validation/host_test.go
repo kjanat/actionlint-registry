@@ -7,24 +7,30 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
 
 var hostFixtures = map[string]string{
-	"core-echo":                       "internal/plugins/execution/module/testdata/engines/echo.wasm",
-	"core-missing-export":             "internal/plugins/execution/module/testdata/wat/missing-export.wasm",
-	"component-no-sudo":               "internal/plugins/execution/component/testdata/plugins/no-sudo.wasm",
-	"component-script":                "internal/plugins/execution/component/testdata/plugins/script-engine.wasm",
-	"component-runners":               "internal/plugins/execution/component/testdata/plugins/buildkite-runners.wasm",
-	"component-script-0.3.0":          "internal/plugins/execution/component/testdata/plugins/script-engine-0.3.0.wasm",
-	"component-template-script-0.3.0": "internal/plugins/execution/component/testdata/plugins/template-script-engine-0.3.0.wasm",
-	"component-insecure-download":     "internal/plugins/execution/component/testdata/plugins/insecure-download.wasm",
-	"component-wrong-enum":            "internal/plugins/execution/component/testdata/contracts/wrong-enum.wasm",
-	"component-wrong-record":          "internal/plugins/execution/component/testdata/contracts/wrong-record.wasm",
-	"component-wrong-signature":       "internal/plugins/execution/component/testdata/contracts/wrong-signature.wasm",
+	"core-echo":                       "internal/plugins/pluginexecution/module/testdata/engines/echo.wasm",
+	"core-missing-export":             "internal/plugins/pluginexecution/module/testdata/wat/missing-export.wasm",
+	"component-no-sudo":               "internal/plugins/pluginexecution/component/testdata/plugins/no-sudo.wasm",
+	"component-managed-no-sudo":       "internal/plugins/pluginexecution/component/testdata/plugins/managed-no-sudo.wasm",
+	"component-script":                "internal/plugins/pluginexecution/component/testdata/plugins/script-engine.wasm",
+	"component-runners":               "internal/plugins/pluginexecution/component/testdata/plugins/buildkite-runners.wasm",
+	"component-runners-0.3.0":         "internal/plugins/pluginexecution/component/testdata/plugins/runner-support-0.3.0.wasm",
+	"component-script-0.3.0":          "internal/plugins/pluginexecution/component/testdata/plugins/script-engine-0.3.0.wasm",
+	"component-template-script-0.3.0": "internal/plugins/pluginexecution/component/testdata/plugins/template-script-engine-0.3.0.wasm",
+	"component-insecure-download":     "internal/plugins/pluginexecution/component/testdata/plugins/insecure-download.wasm",
+	"component-wrong-enum":            "internal/plugins/pluginexecution/component/testdata/contracts/wrong-enum.wasm",
+	"component-wrong-record":          "internal/plugins/pluginexecution/component/testdata/contracts/wrong-record.wasm",
+	"component-wrong-signature":       "internal/plugins/pluginexecution/component/testdata/contracts/wrong-signature.wasm",
 }
+
+var testAsOf = lifecycle.DateOf(time.Date(2026, time.December, 8, 0, 0, 0, 0, time.UTC))
 
 var hostDirectory = sync.OnceValues(func() (string, error) {
 	output, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", hostModule).Output()

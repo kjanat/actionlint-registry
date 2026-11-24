@@ -346,14 +346,19 @@ summary {
 .status-guide dd {
 	font-size: 0.9rem;
 }
-.integrity {
+.integrity, .interfaces {
 	margin: 1rem 0 0;
 }
-.integrity div + div {
+.integrity div + div, .interfaces div + div {
 	margin-top: 0.75rem;
 }
 .integrity code {
 	display: block;
+}
+.interfaces ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
 }
 .help {
 	max-width: 75ch;

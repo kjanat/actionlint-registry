@@ -88,6 +88,67 @@ jobs:
           fixture: adapters/actionlint/internal/validation/testdata/candidate.ts
           report: ${{ runner.temp }}/candidate-check/receipt.json
 
+  oci-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with: { go-version-file: adapters/actionlint/go.mod, cache: false }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with: { no-cache: true }
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with: { version: 2026.11.10, install: false, cache: false }
+      - name: Install the ORAS version pinned in mise.toml
+        run: mise install oras
+      - name: Package two-platform fixture images
+        id: layout
+        run: |
+          bun install --frozen-lockfile
+          oras="$(mise which oras)"
+          fixture="$PWD/adapters/actionlint/internal/validation/testdata/candidate.ts"
+          dir="$RUNNER_TEMP/oci-candidate"
+          layout="$dir/layout"
+          printf 'layout=%s\n' "$layout" >>"$GITHUB_OUTPUT"
+          for image in good mismatch; do
+            contract=kjanat:actionlint/analyzer@0.2.0
+            if [[ "$image" == mismatch ]]; then contract=kjanat:actionlint/analyzer@0.3.0; fi
+            tags=()
+            for platform in linux/amd64 linux/arm64; do
+              tag="$image-${platform//\//-}"
+              mkdir -p "$dir/$tag"
+              bun "$fixture" package --platform "$platform" --interface "$contract" --output "$dir/$tag/plugin.wasm"
+              (cd "$dir/$tag" && "$oras" push --oci-layout "$layout:$tag" --artifact-type application/vnd.actionlint.plugin.v1+json --artifact-platform "$platform" plugin.wasm:application/wasm)
+              tags+=("$tag")
+            done
+            "$oras" manifest index create --oci-layout "$layout:$image" "${tags[@]}"
+            printf '%s=oci://ghcr.io/kjanat/actionlint-registry-fixture@%s\n' "$image" "$("$oras" resolve --oci-layout "$layout:$image")" >>"$GITHUB_OUTPUT"
+          done
+      - name: Exercise the shared candidate action on the two-platform image
+        uses: ./check
+        with:
+          oci: ${{ steps.layout.outputs.good }}
+          oci-layout: ${{ steps.layout.outputs.layout }}
+          fixture: adapters/actionlint/internal/validation/testdata/candidate.ts
+          report: ${{ runner.temp }}/oci-candidate/receipt.json
+      - name: Exercise the shared candidate action on an image declaring analyzer@0.3.0
+        id: mismatch
+        continue-on-error: true
+        uses: ./check
+        with:
+          oci: ${{ steps.layout.outputs.mismatch }}
+          oci-layout: ${{ steps.layout.outputs.layout }}
+          fixture: adapters/actionlint/internal/validation/testdata/candidate.ts
+          report: ${{ runner.temp }}/oci-candidate/mismatch.json
+      - name: Require the checker to reject the declared analyzer@0.3.0
+        env:
+          OUTCOME: ${{ steps.mismatch.outcome }}
+          REPORT: ${{ runner.temp }}/oci-candidate/mismatch.json
+        run: |
+          test "$OUTCOME" = failure
+          test ! -e "$REPORT"
+
   worker:
     runs-on: ubuntu-latest
     timeout-minutes: 10

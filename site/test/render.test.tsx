@@ -79,3 +79,35 @@ test('publisher metadata and status replacements remain text on both pages', asy
 		expect(html).not.toContain('href="javascript:');
 	}
 });
+
+test('each version shows the interfaces it exports and imports', async () => {
+	const directory = await createExport([{
+		name: 'Plugin',
+		versions: [
+			{ version: 'v1', publishedAt: '2026-01-01T00:00:00Z', count: 1 },
+			{
+				version: 'v2',
+				publishedAt: '2026-01-02T00:00:00Z',
+				count: 1,
+				interfaces: {
+					imports: ['wasi:cli/environment@0.2.0', '<script>alert(4)</script>'],
+					exports: ['kjanat:actionlint/analyzer@0.2.0'],
+				},
+			},
+			{ version: 'v3', publishedAt: '2026-01-03T00:00:00Z', count: 1, interfaces: { imports: [], exports: [] } },
+		],
+	}]);
+	const data = await loadCatalogue(directory);
+	const plugin = data.plugins[0];
+	if (!plugin) throw new Error('Missing fixture plugin');
+	const page = render(<PluginPage plugin={plugin} observedAt={data.observedAt} />);
+	const [v3, v2, v1] = page.split('<li class="release"').slice(1);
+	expect(v2).toContain(
+		'<dt>Exports</dt><dd><ul role="list"><li><code>kjanat:actionlint/analyzer@0.2.0</code></li></ul></dd>',
+	);
+	expect(v2).toContain('<li><code>wasi:cli/environment@0.2.0</code></li>');
+	expect(v2).toContain('&lt;script>alert(4)&lt;/script>');
+	expect(v3).toContain('<dt>Exports</dt><dd><span>None</span></dd>');
+	expect(v3).toContain('<dt>Imports</dt><dd><span>None</span></dd>');
+	expect(v1).not.toContain('class="interfaces"');
+});

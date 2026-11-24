@@ -73,21 +73,29 @@ export async function checkCandidate(options: CheckOptions, run = execute, runRe
 	if (options.ociLayout !== undefined && (!options.ociLayout || !options.artifact.startsWith('oci://'))) {
 		throw new Error('A local OCI layout requires a pinned --oci reference');
 	}
-	if (options.checker !== undefined && !options.artifact.startsWith('oci://')) {
-		const report = object(
-			object(
-				JSON.parse(
-					await run(
-						resolve(options.registry),
-						['check', '--checker', resolve(options.checker), '--artifact', resolve(options.artifact)],
-						process.cwd(),
-						process.env,
-					),
-				),
-			).report,
+	if (options.checker !== undefined) {
+		const oci = options.artifact.startsWith('oci://');
+		const output = await run(
+			resolve(options.registry),
+			[
+				'check',
+				'--checker',
+				resolve(options.checker),
+				'--artifact',
+				oci ? options.artifact : resolve(options.artifact),
+				...(options.ociLayout ? ['--oci-layout', resolve(options.ociLayout)] : []),
+			],
+			process.cwd(),
+			process.env,
 		);
-		if (report.outcome === 'failed') {
-			throw new Error(`Registry checker rejected the candidate: ${String(report.detail)}`);
+		const reports = output.split('\n').filter(line => line.trim() !== '').map(line =>
+			object(object(JSON.parse(line)).report)
+		);
+		if (reports.length === 0) throw new Error('Registry checker produced no report');
+		for (const report of reports) {
+			if (report.outcome === 'failed') {
+				throw new Error(`Registry checker rejected the candidate: ${String(report.detail)}`);
+			}
 		}
 	}
 	return verifyInstallation(options, { kind: 'candidate', options }, run, runResult);

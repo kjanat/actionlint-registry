@@ -1,9 +1,11 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -217,13 +219,25 @@ func verifyOCI(data []byte, digest string, size int64) error {
 	return nil
 }
 
+// actionlint installs a platform only when its metadata equals the release's
+// metadata after JSON canonicalization.
 func sameDeclaration(a, b artifact.Declaration) bool {
-	return a.Kind == b.Kind && a.PluginID == b.PluginID && a.PluginVersion == b.PluginVersion && a.Repository == b.Repository && a.Contract == b.Contract
+	left, right := jsontext.Value(bytes.Clone(a.Metadata)), jsontext.Value(bytes.Clone(b.Metadata))
+	canonical := left.Canonicalize(jsontext.CanonicalizeRawInts(false), jsontext.CanonicalizeRawFloats(false)) == nil && right.Canonicalize(jsontext.CanonicalizeRawInts(false), jsontext.CanonicalizeRawFloats(false)) == nil
+	return canonical && bytes.Equal(left, right) && a.Kind == b.Kind && a.PluginID == b.PluginID && a.PluginVersion == b.PluginVersion && a.Repository == b.Repository && a.Contract == b.Contract
 }
 
 // Inspect binds the discovery declaration to the root index/manifest digest,
 // while independently checking every referenced descriptor and primary layer.
-func (o *OCIInspector) Inspect(ctx context.Context, reference string) (result artifact.Declaration, err error) {
+func (o *OCIInspector) Inspect(ctx context.Context, reference string) (artifact.Declaration, error) {
+	return o.Walk(ctx, reference, nil)
+}
+
+type OCILayer func(digest, mediaType string, data []byte) error
+
+type OCIWalker func(ctx context.Context, reference string, layer OCILayer) (artifact.Declaration, error)
+
+func (o *OCIInspector) Walk(ctx context.Context, reference string, layer OCILayer) (result artifact.Declaration, err error) {
 	distribution, err := OCIReference(reference)
 	if err != nil {
 		return result, err
@@ -238,6 +252,7 @@ func (o *OCIInspector) Inspect(ctx context.Context, reference string) (result ar
 		blob: func(ctx context.Context, digest string, limit int64) ([]byte, error) {
 			return o.fetch(ctx, base+"/blobs/"+digest, repository, limit)
 		},
+		primary: layer,
 	})
 }
 
@@ -246,6 +261,7 @@ type ociRead func(context.Context, string, int64) ([]byte, error)
 type ociObjects struct {
 	manifest, blob ociRead
 	verified       func(string, []byte) error
+	primary        OCILayer
 }
 
 // Content embedded in a descriptor has the same size/digest requirements as a
@@ -346,7 +362,7 @@ func inspectOCI(ctx context.Context, distribution Distribution, source ociObject
 		}
 		descriptors := append([]ociDescriptor{*document.Config}, document.Layers...)
 		var primary []byte
-		primaryType := ""
+		primaryType, primaryDigest := "", ""
 		blobs := map[string]ociDescriptor{}
 		for position, blob := range descriptors {
 			if err = validateDescriptor(blob); err != nil {
@@ -371,7 +387,7 @@ func inspectOCI(ctx context.Context, distribution Distribution, source ociObject
 				if primary != nil {
 					return reject("OCI manifest requires exactly one primary plugin layer")
 				}
-				primary, primaryType = content, blob.MediaType
+				primary, primaryType, primaryDigest = content, blob.MediaType, blob.Digest
 			}
 		}
 		if primary == nil {
@@ -394,9 +410,12 @@ func inspectOCI(ctx context.Context, distribution Distribution, source ociObject
 			return reject("OCI layer media type disagrees with package kind")
 		}
 		if result.PluginID != "" && !sameDeclaration(result, declared) {
-			return reject("OCI platform variants disagree on discovery identity or contract")
+			return reject("OCI platform variants disagree on discovery metadata or contract")
 		}
 		result = declared
+		if source.primary != nil {
+			return source.primary(primaryDigest, primaryType, primary)
+		}
 		return nil
 	}
 	root, err = source.content(ctx, ociDescriptor{Digest: rootDigest, Size: -1}, 4<<20, source.manifest)

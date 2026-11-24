@@ -187,4 +187,37 @@ describe('public registry JSON projection', () => {
 			source: { type: 'release-asset', name: 'plugin.json.gz' },
 		});
 	});
+
+	test('projects the interfaces each version imports and exports', async () => {
+		const interfaces = {
+			imports: ['wasi:cli/environment@0.2.0', 'kjanat:actionlint/invocation-context@0.2.0'],
+			exports: ['kjanat:actionlint/analyzer@0.2.0'],
+		};
+		const directory = await createExport([{
+			name: 'Plugin',
+			versions: [
+				{ version: 'v1', publishedAt: '2026-01-01T00:00:00Z', count: 1 },
+				{ version: 'v2', publishedAt: '2026-01-02T00:00:00Z', count: 1, interfaces },
+				{ version: 'v3', publishedAt: '2026-01-03T00:00:00Z', count: 1, interfaces: { imports: [], exports: [] } },
+			],
+		}]);
+		expect((await loadCatalogue(directory)).plugins[0]?.releases.map(release => release.interfaces)).toEqual([
+			{ imports: [], exports: [] },
+			interfaces,
+			null,
+		]);
+	});
+
+	test.each(['imports', 'exports'] as const)('rejects a version listing only its %s', async field => {
+		const directory = await createExport([{
+			name: 'Plugin',
+			versions: [{
+				version: 'v1',
+				publishedAt: '2026-01-01T00:00:00Z',
+				count: 1,
+				interfaces: { [field]: ['kjanat:actionlint/analyzer@0.2.0'] },
+			}],
+		}]);
+		await expect(loadCatalogue(directory)).rejects.toThrow('both imports and exports or neither');
+	});
 });

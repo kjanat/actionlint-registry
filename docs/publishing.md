@@ -70,8 +70,10 @@ bun scripts/cli.ts check \
 
 The reference names the intended public destination. That image does not need to
 exist yet. The registry verifies the local graph with the same admission checks
-used for remote sources, including embedded descriptor data. It snapshots only
-reachable verified blobs; the harness restores those portable bytes into its
+used for remote sources, including embedded descriptor data. With `--checker`,
+which the shared check action always passes, the compatibility checker runs on the
+primary layer of each platform, and a `failed` layer rejects the candidate. The
+registry snapshots only reachable verified blobs; the harness restores those portable bytes into its
 fresh cache, then uses ordinary host installation and behavior checks. Inspection,
 installation and fixture execution all run with blocked HTTP proxies.
 

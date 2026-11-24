@@ -9,11 +9,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"registry.actionlint.kjanat.dev/internal/artifact"
+	"registry.actionlint.kjanat.dev/internal/compatibility"
 	"registry.actionlint.kjanat.dev/internal/registry"
 )
 
@@ -42,7 +44,8 @@ func run(ctx context.Context, args []string) error {
 	downloadCounts := flags.Bool("download-counts", false, "Refresh GitHub asset download counts when exporting the catalogue.")
 	pluginID := flags.String("plugin", "", "Identify the plugin by provider/repository or host/repository.")
 	checker := flags.String("checker", "", "Trusted checker executable; check records an observation and admit rejects a failed outcome.")
-	evidencePath := flags.String("compatibility", "registry/compatibility", "Read or append host compatibility observations in this directory.")
+	evidencePath := flags.String("compatibility", "registry/compatibility", "Read or append host compatibility observations in this directory; admit --candidate defaults to the candidate's sibling compatibility directory.")
+	candidateEvidencePath := flags.String("candidate-compatibility", "", "Merge the compatibility observations that admission wrote to this directory.")
 	version := flags.String("version", "", "Resolve this exact accepted release tag.")
 	statusPath := flags.String("statuses", "registry/status", "Read or append audited release status events.")
 	state := flags.String("status", "", "Set active, deprecated, withdrawn or revoked.")
@@ -56,8 +59,17 @@ func run(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return errors.New("this command does not accept positional arguments")
 	}
-	if *ociLayout != "" && args[0] != "inspect" && args[0] != "candidate" {
-		return errors.New("--oci-layout is available only for inspect and candidate")
+	explicit := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	if args[0] == "admit" && *candidatePath != "" && !explicit["compatibility"] {
+		candidate, err := filepath.Abs(*candidatePath)
+		if err != nil {
+			return err
+		}
+		*evidencePath = filepath.Join(filepath.Dir(candidate), "compatibility")
+	}
+	if *ociLayout != "" && args[0] != "inspect" && args[0] != "candidate" && args[0] != "check" {
+		return errors.New("--oci-layout is available only for inspect, candidate and check")
 	}
 	if args[0] == "inspect" {
 		if *artifactPath == "" {
@@ -117,38 +129,54 @@ func run(ctx context.Context, args []string) error {
 		}
 		return (registry.StatusStore{Directory: *statusPath}).Add(index, status)
 	case "check":
-		if strings.HasPrefix(*artifactPath, "oci://") {
-			return errors.New("OCI graph compatibility checks are unsupported by the local-file checker protocol")
-		}
 		if *checker == "" || *artifactPath == "" || (*pluginID == "") != (*version == "") {
 			return errors.New("check requires --checker and --artifact; add both --plugin and --version to record evidence for an accepted release")
 		}
-		if *pluginID == "" {
+		oci := strings.HasPrefix(*artifactPath, "oci://")
+		walk := registry.NewOCIInspector().Walk
+		if *ociLayout != "" {
+			if !oci {
+				return errors.New("check --oci-layout requires an oci:// artifact")
+			}
+			walk = registry.LayoutWalker(*ociLayout)
+		}
+		var observed []compatibility.Evidence
+		if *pluginID == "" && oci {
+			if _, observed, err = registry.CheckOCI(ctx, *checker, walk, *artifactPath, ""); err != nil {
+				return err
+			}
+			if *reportPath != "" {
+				return registry.WriteJSON(*reportPath, observed)
+			}
+		} else if *pluginID == "" {
 			declaration, err := artifact.Inspect(ctx, *artifactPath)
 			if err != nil {
 				return err
 			}
-			evidence, err := registry.CheckArtifact(ctx, *checker, *artifactPath, declaration.SHA256)
+			evidence, err := registry.CheckArtifact(ctx, *checker, *artifactPath, declaration.SHA256, "")
 			if err != nil {
 				return err
 			}
 			if *reportPath != "" {
 				return registry.WriteJSON(*reportPath, evidence)
 			}
-			return json.NewEncoder(os.Stdout).Encode(evidence)
+			observed = []compatibility.Evidence{evidence}
+		} else {
+			entry, err := registry.Find(index, *pluginID, *version)
+			if err != nil {
+				return err
+			}
+			if observed, err = (registry.EvidenceStore{Directory: *evidencePath}).Recheck(ctx, index, *checker, *artifactPath, entry, walk); err != nil {
+				return err
+			}
 		}
-		entry, err := registry.Find(index, *pluginID, *version)
-		if err != nil {
-			return err
+		encoder := json.NewEncoder(os.Stdout)
+		for _, evidence := range observed {
+			if err = encoder.Encode(evidence); err != nil {
+				return err
+			}
 		}
-		evidence, err := registry.CheckCompatibility(ctx, *checker, *artifactPath, entry)
-		if err != nil {
-			return err
-		}
-		if err = (registry.EvidenceStore{Directory: *evidencePath}).Add(index, evidence); err != nil {
-			return err
-		}
-		return json.NewEncoder(os.Stdout).Encode(evidence)
+		return nil
 	case "resolve":
 		statuses, err := (registry.StatusStore{Directory: *statusPath}).Load(index)
 		if err != nil {
@@ -203,7 +231,13 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		mergeErr := store.Merge(candidate)
+		var evidence []compatibility.Evidence
+		if *candidateEvidencePath != "" {
+			if evidence, err = (registry.EvidenceStore{Directory: *candidateEvidencePath}).Load(candidate); err != nil {
+				return err
+			}
+		}
+		mergeErr := registry.MergeCandidate(store, candidate, evidence, registry.EvidenceStore{Directory: *evidencePath})
 		if *reportPath != "" {
 			report := registry.NewReport("merge")
 			for _, entry := range candidate.Entries {
@@ -246,7 +280,8 @@ func run(ctx context.Context, args []string) error {
 		service := registry.Service{Providers: providers, Checker: *checker}
 		report := registry.NewReport("admit")
 		report.SubmissionID = receipt.ID
-		entry, admissionErr := service.Admit(ctx, &index, receipt)
+		admission, admissionErr := service.Admit(ctx, &index, receipt)
+		entry := admission.Entry
 		if admissionErr == nil {
 			delta := registry.EmptyIndex()
 			if err = delta.Add(entry); err != nil {
@@ -256,7 +291,7 @@ func run(ctx context.Context, args []string) error {
 			if *candidatePath != "" {
 				destination.Directory = *candidatePath
 			}
-			admissionErr = destination.Merge(delta)
+			admissionErr = destination.MergeAdmission(delta, admission.Evidence, registry.EvidenceStore{Directory: *evidencePath})
 		}
 		if admissionErr == nil {
 			report.Accepted = append(report.Accepted, entry)

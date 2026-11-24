@@ -36,24 +36,44 @@ function object(value: unknown): Record<string, unknown> {
 
 export async function verify({ directory, run }: Context): Promise<{ checks: string[]; probe: string[] }> {
 	const probe = ['check', '--json', 'workflow.yml'];
-	const result = object(JSON.parse(await run(probe, 1)));
+	const result = object(JSON.parse(await run(probe)));
 	assert.equal(result.completed, true);
-	assert.equal(result.exit_code, 1);
+	assert.equal(result.exit_code, 0);
+	assert.equal(result.failure_threshold, 'error');
 	assert.ok(Array.isArray(result.diagnostics));
 	assert.equal(result.diagnostics.length, 1);
 	const finding = object(result.diagnostics[0]);
 	assert.equal(finding.rule, 'no-sudo');
+	assert.equal(finding.severity, 'warning');
 	assert.deepEqual(finding.start, { line: 11, column: 11 });
+	const strictProbe = ['check', '--strict', '--json', 'workflow.yml'];
+	const strict = object(JSON.parse(await run(strictProbe, 1)));
+	assert.equal(strict.completed, true);
+	assert.equal(strict.exit_code, 1);
+	assert.equal(strict.failure_threshold, 'warning');
+	assert.ok(Array.isArray(strict.diagnostics));
+	assert.deepEqual(strict.diagnostics.map(diagnostic => object(diagnostic).rule), ['no-sudo']);
 	await writeFile(join(directory, 'workflow.yml'), workflow.replace('sudo ', ''));
 	try {
 		const clean = object(JSON.parse(await run(probe)));
 		assert.equal(clean.completed, true);
 		assert.equal(clean.exit_code, 0);
 		assert.deepEqual(clean.diagnostics, []);
+		const strictClean = object(JSON.parse(await run(strictProbe)));
+		assert.equal(strictClean.completed, true);
+		assert.equal(strictClean.exit_code, 0);
+		assert.deepEqual(strictClean.diagnostics, []);
 	} finally {
 		await writeFile(join(directory, 'workflow.yml'), workflow);
 	}
-	return { checks: ['mapped no-sudo diagnostic', 'source correction clears diagnostic'], probe };
+	return {
+		checks: [
+			'mapped no-sudo diagnostic',
+			'strict check fails on the plugin warning',
+			'source correction clears diagnostic',
+		],
+		probe,
+	};
 }
 
 function unsignedLEB(value: number): number[] {
@@ -73,7 +93,7 @@ function hostFixture(): string {
 		encoding: 'utf8',
 	})));
 	assert.ok(typeof download.Dir === 'string' && download.Dir !== '', 'go mod download returned no module directory');
-	return join(download.Dir, 'internal/plugins/execution/component/testdata/plugins/no-sudo.wasm');
+	return join(download.Dir, 'internal/plugins/pluginexecution/component/testdata/plugins/no-sudo.wasm');
 }
 
 function withoutDiscovery(module: Buffer): Buffer {
@@ -104,7 +124,7 @@ function withoutDiscovery(module: Buffer): Buffer {
 
 // Replace the upstream component's discovery metadata, just as a plugin package
 // build does. Installation, lock creation and caching belong to the actual CLI.
-async function packageFixture(output: string): Promise<void> {
+async function packageFixture(output: string, platform: string, contract: string): Promise<void> {
 	const bytes = withoutDiscovery(await readFile(hostFixture()));
 	const metadata = {
 		metadata_version: 1,
@@ -115,7 +135,7 @@ async function packageFixture(output: string): Promise<void> {
 		license: 'MIT',
 		repository: 'https://github.com/example/plugin',
 		plugin_version: '1.0.0',
-		interface: 'kjanat:actionlint/analyzer@0.2.0',
+		interface: contract,
 		wit_sha256: '287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23',
 		descriptor: {
 			name: 'no-sudo',
@@ -132,7 +152,13 @@ async function packageFixture(output: string): Promise<void> {
 	};
 	const name = Buffer.from('actionlint.plugin');
 	const section = Buffer.concat([Buffer.from(unsignedLEB(name.length)), name, Buffer.from(JSON.stringify(metadata))]);
-	await writeFile(output, Buffer.concat([bytes, Buffer.from([0, ...unsignedLEB(section.length)]), section]));
+	const sections = [bytes, Buffer.from([0, ...unsignedLEB(section.length)]), section];
+	if (platform) {
+		const label = Buffer.from('registry-fixture.platform');
+		const custom = Buffer.concat([Buffer.from(unsignedLEB(label.length)), label, Buffer.from(platform)]);
+		sections.push(Buffer.from([0, ...unsignedLEB(custom.length)]), custom);
+	}
+	await writeFile(output, Buffer.concat(sections));
 }
 
 if (import.meta.main) {
@@ -140,8 +166,16 @@ if (import.meta.main) {
 		command('package')
 			.description('Package the upstream no-sudo component for candidate installation')
 			.flag('output', flag.string().required().describe('Packaged Wasm destination'))
+			.flag(
+				'platform',
+				flag.string().default('').describe('OCI platform recorded in a registry-fixture.platform custom section'),
+			)
+			.flag(
+				'interface',
+				flag.string().default('kjanat:actionlint/analyzer@0.2.0').describe('Declared component interface'),
+			)
 			.action(async ({ flags }) => {
-				await packageFixture(flags.output);
+				await packageFixture(flags.output, flags.platform, flags.interface);
 			}),
 	).run();
 }

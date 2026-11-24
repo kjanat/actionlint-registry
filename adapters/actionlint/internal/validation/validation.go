@@ -15,10 +15,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
-	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
+	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
+	"actionlint.kjanat.dev/v2/internal/model/rule"
+	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
-	corewasm "actionlint.kjanat.dev/v2/internal/plugins/execution/module"
+	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
+	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/module"
 )
 
 const callTimeout = 10 * time.Second
@@ -34,37 +36,76 @@ type Result struct {
 	Repository    string          `json:"repository"`
 	Contract      string          `json:"contract"`
 	PolicyVersion string          `json:"policy_version"`
+	RunnerAsOf    string          `json:"runner_as_of,omitempty"`
 }
 
-// Validate accepts only a snapshot stored in a local regular file. The caller must
-// verify its checksum before calling Validate and keep the file unchanged until it returns.
-func Validate(ctx context.Context, path string) (Result, error) {
+type Artifact struct {
+	path       string
+	resolved   *pluginartifact.Artifact
+	Interfaces *component.Interfaces
+}
+
+// Open accepts only a snapshot stored in a local regular file. The caller must
+// verify its checksum before calling Open and keep the file unchanged until
+// validation returns.
+func Open(ctx context.Context, path string) (Artifact, error) {
 	if strings.Contains(path, "://") {
-		return Result{}, errors.New("validation requires a local snapshot")
+		return Artifact{}, errors.New("validation requires a local snapshot")
 	}
 	path, err := filepath.Abs(path)
 	if err != nil {
-		return Result{}, err
+		return Artifact{}, err
 	}
 	stat, err := os.Lstat(path)
 	if err != nil {
-		return Result{}, err
+		return Artifact{}, err
 	}
 	if !stat.Mode().IsRegular() {
-		return Result{}, errors.New("snapshot must be a regular file")
+		return Artifact{}, errors.New("snapshot must be a regular file")
 	}
 	process, err := isProcessManifest(path)
 	if err != nil {
-		return Result{}, err
+		return Artifact{}, err
 	}
 	if process {
-		return Result{}, fmt.Errorf("%w: process/1 requires a process-aware checker; this checker exercises WASM contracts only", ErrUnsupportedContract)
+		return Artifact{}, fmt.Errorf("%w: process/1 requires a process-aware checker; this checker exercises WASM contracts only", ErrUnsupportedContract)
 	}
-	artifact, err := pluginartifact.Resolve(ctx, path, pluginartifact.Options{MaxBytes: 128 << 20})
+	resolved, err := pluginartifact.Resolve(ctx, path, pluginartifact.Options{MaxBytes: 128 << 20})
+	if err != nil {
+		return Artifact{}, err
+	}
+	opened := Artifact{path: path, resolved: resolved}
+	if resolved.Info.Kind == pluginartifact.Component {
+		interfaces, err := component.ReadInterfaces(resolved.Bytes)
+		if err != nil {
+			return Artifact{}, err
+		}
+		opened.Interfaces = &interfaces
+	}
+	return opened, nil
+}
+
+func Validate(ctx context.Context, runnerAsOf lifecycle.Date, path string) (Result, error) {
+	opened, err := Open(ctx, path)
 	if err != nil {
 		return Result{}, err
 	}
-	info := artifact.Info
+	return opened.Validate(ctx, runnerAsOf)
+}
+
+func (opened Artifact) Validate(ctx context.Context, runnerAsOf lifecycle.Date) (Result, error) {
+	if runnerAsOf.IsZero() {
+		return Result{}, errors.New("validation requires a runner assessment date")
+	}
+	info := opened.resolved.Info
+	var roles component.Roles
+	if info.Kind == pluginartifact.Component {
+		admitted, err := admitComponent(ctx, opened.resolved.Bytes)
+		if err != nil {
+			return Result{}, err
+		}
+		roles = admitted
+	}
 	manifest, err := inspectMetadata(ctx, info)
 	if err != nil {
 		return Result{}, err
@@ -72,9 +113,9 @@ func Validate(ctx context.Context, path string) (Result, error) {
 	var result Result
 	switch info.Kind {
 	case pluginartifact.Core:
-		result, err = validateCore(ctx, path)
+		result, err = validateCore(ctx, opened.path)
 	case pluginartifact.Component:
-		result, err = validateComponent(ctx, path, manifest)
+		result, err = validateComponent(ctx, opened.resolved, roles, manifest, runnerAsOf)
 	default:
 		return Result{}, errors.New("unsupported artifact kind")
 	}
@@ -94,7 +135,7 @@ func Validate(ctx context.Context, path string) (Result, error) {
 }
 
 func validateCore(ctx context.Context, path string) (result Result, err error) {
-	engine, err := corewasm.Load(ctx, path, corewasm.Options{Timeout: callTimeout, MemoryPages: 4096})
+	engine, err := module.LoadModuleEngine(ctx, path, module.Options{Timeout: callTimeout, MemoryPages: 4096})
 	if err != nil {
 		return result, err
 	}
@@ -133,7 +174,7 @@ func validateCore(ctx context.Context, path string) (result Result, err error) {
 	if err := engine.ValidateConfig(ctx, nil); err != nil {
 		return result, fmt.Errorf("default configuration: %w", err)
 	}
-	request := checkinputs.ScriptRequest{Source: "\n", Filename: "registry-smoke.txt"}
+	request := scriptengine.Request{Source: "\n", Filename: "registry-smoke.txt"}
 	if slices.Contains(metadata.Capabilities.ScriptShells, "python") || metadata.Engine.Name == "ruff" {
 		request.Source, request.Filename = "print(missing)\n", "registry-smoke.py"
 	}
@@ -145,7 +186,7 @@ func validateCore(ctx context.Context, path string) (result Result, err error) {
 		if err := scriptFindings(findings, request); err != nil {
 			return result, err
 		}
-		if metadata.Engine.Name == "ruff" && !slices.ContainsFunc(findings, func(d checkinputs.ScriptDiagnostic) bool { return d.Code == "F821" }) {
+		if metadata.Engine.Name == "ruff" && !slices.ContainsFunc(findings, func(d scriptengine.Diagnostic) bool { return d.Code == "F821" }) {
 			return result, errors.New("ruff smoke sample did not report F821")
 		}
 	}

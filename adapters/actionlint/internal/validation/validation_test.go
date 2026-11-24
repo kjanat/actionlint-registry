@@ -9,16 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"actionlint.kjanat.dev/v2/internal/checking"
-	checkinputs "actionlint.kjanat.dev/v2/internal/checking/inputs"
-	rule "actionlint.kjanat.dev/v2/internal/checking/rules"
-	sourcepos "actionlint.kjanat.dev/v2/internal/input/source"
-	componenthost "actionlint.kjanat.dev/v2/internal/plugins/execution/component"
+	"actionlint.kjanat.dev/v2/internal/base/sourcetext"
+	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
+	"actionlint.kjanat.dev/v2/internal/model/rule"
+	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
 	results "actionlint.kjanat.dev/v2/internal/results"
 )
 
 func TestCompatibleComponent(t *testing.T) {
-	result, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", componentMetadata))
+	result, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", componentMetadata))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,12 +27,12 @@ func TestCompatibleComponent(t *testing.T) {
 }
 
 func TestComponentFindingUsesWorkflowCoordinates(t *testing.T) {
-	component, err := componenthost.Load(t.Context(), hostFixture(t, "component-no-sudo"), componenthost.Options{Timeout: callTimeout, MemoryPages: 1024, ReservedRules: checking.BuiltinRuleNames()})
+	plugin, err := loadComponent(t.Context(), hostFixture(t, "component-no-sudo"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := component.Close(context.Background()); err != nil {
+		if err := plugin.Close(context.Background()); err != nil {
 			t.Error(err)
 		}
 	})
@@ -41,11 +40,11 @@ func TestComponentFindingUsesWorkflowCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings, err := component.CheckDocument(t.Context(), input)
+	findings, err := plugin.AnalyzeDocument(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 1 || findings[0].Start != (sourcepos.Position{Line: 10, Column: 11}) {
+	if len(findings) != 1 || findings[0].Start != (sourcetext.Position{Line: 10, Column: 11}) {
 		t.Fatalf("expected mapped sudo diagnostic: %+v", findings)
 	}
 	if err := componentFindings(findings, input, []string{"no-sudo"}); err != nil {
@@ -60,7 +59,7 @@ func TestRuntimeRejections(t *testing.T) {
 			if strings.HasPrefix(name, "core-") {
 				metadata = coreMetadata
 			}
-			if _, err := Validate(t.Context(), packagedFixture(t, name, metadata)); err == nil {
+			if _, err := Validate(t.Context(), testAsOf, packagedFixture(t, name, metadata)); err == nil {
 				t.Fatal("invalid host contract accepted")
 			}
 		})
@@ -73,14 +72,14 @@ func TestMalformedAndRemoteRejections(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, input := range []string{path, filepath.Dir(path), "https://example.invalid/plugin.wasm"} {
-		if _, err := Validate(t.Context(), input); err == nil {
+		if _, err := Validate(t.Context(), testAsOf, input); err == nil {
 			t.Fatalf("accepted %q", input)
 		}
 	}
 }
 
 func TestCoreFixture(t *testing.T) {
-	result, err := Validate(t.Context(), coreFixture(t, coreMetadata))
+	result, err := Validate(t.Context(), testAsOf, coreFixture(t, coreMetadata))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +89,7 @@ func TestCoreFixture(t *testing.T) {
 }
 
 func TestCoreRejectsMetadataVersion(t *testing.T) {
-	_, err := Validate(t.Context(), coreFixture(t, strings.Replace(coreMetadata, `"metadata_version":1`, `"metadata_version":2`, 1)))
+	_, err := Validate(t.Context(), testAsOf, coreFixture(t, strings.Replace(coreMetadata, `"metadata_version":1`, `"metadata_version":2`, 1)))
 	if err == nil || !strings.Contains(err.Error(), "metadata_version") {
 		t.Fatalf("expected metadata version rejection, got %v", err)
 	}
@@ -105,7 +104,7 @@ func TestCoreRejectsUnusableRegistration(t *testing.T) {
 		"builtin-collision":      strings.ReplaceAll(coreMetadata, `"name":"smoke"`, `"name":"expression-type"`),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Validate(t.Context(), coreFixture(t, metadata)); err == nil {
+			if _, err := Validate(t.Context(), testAsOf, coreFixture(t, metadata)); err == nil {
 				t.Fatal("accepted a core plugin the application cannot register or invoke")
 			}
 		})
@@ -132,7 +131,7 @@ func TestBundledBackendsSupplyTheirOwnShellSelection(t *testing.T) {
 	metadata := strings.Replace(coreMetadata, `"capabilities":{"script_shells":["bash"]},`, "", 1)
 	metadata = strings.ReplaceAll(metadata, `"name":"smoke"`, `"name":"ruff"`)
 	response := `{"ok":true,"diagnostics":[{"filename":"registry-smoke.py","code":"F821","message":"Undefined name","location":{"row":1,"column":7},"end_location":{"row":1,"column":14}}]}`
-	result, err := Validate(t.Context(), coreFixtureResponse(t, metadata, response))
+	result, err := Validate(t.Context(), testAsOf, coreFixtureResponse(t, metadata, response))
 	if err != nil || result.Kind != "core" {
 		t.Fatalf("Ruff-compatible plugin without generic selectors: %+v %v", result, err)
 	}
@@ -162,7 +161,7 @@ func (candidate *managedAnalyzer) NegotiateTool(context.Context, json.RawMessage
 	return &checkinputs.ToolNegotiation{Options: json.RawMessage(`{}`)}, nil
 }
 
-func (candidate *managedAnalyzer) CheckDocument(_ context.Context, input checkinputs.Input) ([]results.Diagnostic, error) {
+func (candidate *managedAnalyzer) AnalyzeDocument(_ context.Context, input checkinputs.AnalyzerInput) ([]results.Diagnostic, error) {
 	candidate.called = len(input.Scripts) != 0 && input.BuildShellScriptInput != nil
 	return nil, nil
 }
@@ -188,7 +187,7 @@ func (candidate *optionsAnalyzer) Descriptor() checkinputs.Descriptor {
 	return checkinputs.Descriptor{Name: "registry-options-test", Description: "Exercise option registration", Category: "correctness", OptionsSchema: candidate.schema}
 }
 
-func (candidate *optionsAnalyzer) CheckDocument(context.Context, checkinputs.Input) ([]results.Diagnostic, error) {
+func (candidate *optionsAnalyzer) AnalyzeDocument(context.Context, checkinputs.AnalyzerInput) ([]results.Diagnostic, error) {
 	candidate.called = true
 	return nil, nil
 }
@@ -219,21 +218,21 @@ func TestDescriptorBounds(t *testing.T) {
 }
 
 func TestDiagnosticBounds(t *testing.T) {
-	request := checkinputs.ScriptRequest{Source: "é\n", Filename: "test.py"}
-	valid := checkinputs.ScriptDiagnostic{Filename: request.Filename, Code: "X", Message: "example", Location: checkinputs.ScriptPosition{Row: 1, Column: 1}, EndLocation: checkinputs.ScriptPosition{Row: 1, Column: 2}}
-	if err := scriptFindings([]checkinputs.ScriptDiagnostic{valid}, request); err != nil {
+	request := scriptengine.Request{Source: "é\n", Filename: "test.py"}
+	valid := scriptengine.Diagnostic{Filename: request.Filename, Code: "X", Message: "example", Location: sourcetext.Position{Line: 1, Column: 1}, EndLocation: sourcetext.Position{Line: 1, Column: 2}}
+	if err := scriptFindings([]scriptengine.Diagnostic{valid}, request); err != nil {
 		t.Fatal(err)
 	}
 	invalid := valid
 	invalid.EndLocation.Column = 3 // Byte offsets are not Unicode scalar offsets.
-	if err := scriptFindings([]checkinputs.ScriptDiagnostic{invalid}, request); err == nil {
+	if err := scriptFindings([]scriptengine.Diagnostic{invalid}, request); err == nil {
 		t.Fatal("accepted out-of-bounds location")
 	}
 	input, err := workflowInput(t.Context(), sampleWorkflow)
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := results.Diagnostic{Rule: "test", Message: "example", Start: sourcepos.Position{Line: 1, Column: 1}, End: sourcepos.Position{Line: 1, Column: 2}}
+	d := results.Diagnostic{Rule: "test", Message: "example", Start: sourcetext.Position{Line: 1, Column: 1}, End: sourcetext.Position{Line: 1, Column: 2}}
 	if err := componentFindings([]results.Diagnostic{d}, input, []string{"test"}); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +247,29 @@ func TestSharedFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(input.Scripts) != 1 || input.Reference.Revision == "" || len(input.Scripts[0].Spans) == 0 || input.Scripts[0].Runtime == nil || !input.Scripts[0].Runtime.ShellKnown {
+	if len(input.Scripts) != 1 || input.Reference.Revision == "" || len(input.Scripts[0].Spans) == 0 || input.Scripts[0].Runtime == nil || !input.Scripts[0].Runtime.Shell.Known() {
 		t.Fatalf("missing authentic workflow facts: %+v", input)
+	}
+}
+
+type nurseryAnalyzer struct{ called bool }
+
+func (*nurseryAnalyzer) Descriptor() checkinputs.Descriptor {
+	return checkinputs.Descriptor{Name: "registry-nursery-test", Description: "Exercise a nursery rule", Category: "correctness", Maturity: rule.NurseryMaturity, Recommended: true}
+}
+
+func (candidate *nurseryAnalyzer) AnalyzeDocument(context.Context, checkinputs.AnalyzerInput) ([]results.Diagnostic, error) {
+	candidate.called = true
+	return nil, nil
+}
+
+func TestSmokeChecksRunNurseryRules(t *testing.T) {
+	candidate := &nurseryAnalyzer{}
+	if _, err := analyzeComponent(t.Context(), candidate, sampleWorkflow, []string{"registry-nursery-test"}); err != nil || !candidate.called {
+		t.Fatalf("nursery analyzer called=%v error=%v", candidate.called, err)
+	}
+	engine := rule.Descriptor{Name: "registry-nursery-engine", Description: "Exercise a nursery engine", Category: "correctness", Maturity: rule.NurseryMaturity, Recommended: true}
+	if _, err := workflowInputWithDescriptor(t.Context(), sampleWorkflow, engine); err != nil {
+		t.Fatalf("nursery engine registration: %v", err)
 	}
 }

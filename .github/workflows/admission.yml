@@ -64,6 +64,7 @@ jobs:
           --receipt handoff/receipt.json
           --store registry/plugins
           --candidate candidate/plugins
+          --compatibility candidate/compatibility
           --checker ./registry-checker
           --report reports/admission.json
       - name: Preserve admission report
@@ -81,6 +82,7 @@ jobs:
           name: validated-submission
           path: |
             candidate/plugins/
+            candidate/compatibility/
             handoff/lease.json
           if-no-files-found: error
           retention-days: 1
@@ -118,6 +120,8 @@ jobs:
         run: go run ./cmd/registry merge
           --store registry/plugins
           --candidate accepted/candidate/plugins
+          --compatibility registry/compatibility
+          --candidate-compatibility accepted/candidate/compatibility
           --report reports/publication.json
       - name: Save publication result
         if: always() && steps.merge.outcome != 'skipped'
@@ -155,6 +159,9 @@ jobs:
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
           gh auth setup-git
           git add -- registry/plugins
+          if [[ -d registry/compatibility ]]; then
+            git add -- registry/compatibility
+          fi
           if ! git diff --cached --quiet; then
             releases="$(git diff --cached --name-only --diff-filter=A -z -- registry/plugins \
               | xargs -0 jq -r 'select(.submission) | "\(.artifact.plugin_id // .validation.plugin_id)@\(.submission.tag)"' \
