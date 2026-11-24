@@ -124,7 +124,7 @@ function withoutDiscovery(module: Buffer): Buffer {
 
 // Replace the upstream component's discovery metadata, just as a plugin package
 // build does. Installation, lock creation and caching belong to the actual CLI.
-async function packageFixture(output: string): Promise<void> {
+async function packageFixture(output: string, platform: string, contract: string): Promise<void> {
 	const bytes = withoutDiscovery(await readFile(hostFixture()));
 	const metadata = {
 		metadata_version: 1,
@@ -135,7 +135,7 @@ async function packageFixture(output: string): Promise<void> {
 		license: 'MIT',
 		repository: 'https://github.com/example/plugin',
 		plugin_version: '1.0.0',
-		interface: 'kjanat:actionlint/analyzer@0.2.0',
+		interface: contract,
 		wit_sha256: '287f569cb6587a23f2195f9d8398f370c32a2b21deed1fac42f3b56fd03c7c23',
 		descriptor: {
 			name: 'no-sudo',
@@ -152,7 +152,13 @@ async function packageFixture(output: string): Promise<void> {
 	};
 	const name = Buffer.from('actionlint.plugin');
 	const section = Buffer.concat([Buffer.from(unsignedLEB(name.length)), name, Buffer.from(JSON.stringify(metadata))]);
-	await writeFile(output, Buffer.concat([bytes, Buffer.from([0, ...unsignedLEB(section.length)]), section]));
+	const sections = [bytes, Buffer.from([0, ...unsignedLEB(section.length)]), section];
+	if (platform) {
+		const label = Buffer.from('registry-fixture.platform');
+		const custom = Buffer.concat([Buffer.from(unsignedLEB(label.length)), label, Buffer.from(platform)]);
+		sections.push(Buffer.from([0, ...unsignedLEB(custom.length)]), custom);
+	}
+	await writeFile(output, Buffer.concat(sections));
 }
 
 if (import.meta.main) {
@@ -160,8 +166,16 @@ if (import.meta.main) {
 		command('package')
 			.description('Package the upstream no-sudo component for candidate installation')
 			.flag('output', flag.string().required().describe('Packaged Wasm destination'))
+			.flag(
+				'platform',
+				flag.string().default('').describe('OCI platform recorded in a registry-fixture.platform custom section'),
+			)
+			.flag(
+				'interface',
+				flag.string().default('kjanat:actionlint/analyzer@0.2.0').describe('Declared component interface'),
+			)
 			.action(async ({ flags }) => {
-				await packageFixture(flags.output);
+				await packageFixture(flags.output, flags.platform, flags.interface);
 			}),
 	).run();
 }
