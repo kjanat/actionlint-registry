@@ -118,3 +118,15 @@ func TestAcceptedLegacyContractDigest(t *testing.T) {
 		t.Fatalf("accepted two contract digests: %v", err)
 	}
 }
+
+func TestImportThisHostDoesNotProvideIsUnsupported(t *testing.T) {
+	retired := "kjanat:actionlint/prepared-scripts@0.2.0"
+	built := wasmcomponent.Build([]string{retired}, []string{component.AnalyzerInterface}, nil)
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, built, componentMetadata)); !errors.Is(err, ErrUnsupportedContract) || !strings.Contains(err.Error(), retired) {
+		t.Fatalf("an import this host does not provide must be unsupported, got %v", err)
+	}
+	misplaced := wasmcomponent.Build([]string{component.RepositoryObjectsInterface}, []string{component.AnalyzerInterface}, nil)
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, misplaced, componentMetadata)); err == nil || errors.Is(err, ErrUnsupportedContract) {
+		t.Fatalf("a provided import outside its role must fail, got %v", err)
+	}
+}

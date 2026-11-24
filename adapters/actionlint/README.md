@@ -30,7 +30,7 @@ It supports core ABI 1. Components pass the host's own admission decision,
 loads, with the roles that decision returns. The metadata `interface` must name one
 of the component's exports. A component whose declared interface is missing from
 its exports, or one the host rejects, returns `failed`. A declared interface the
-host does not load returns `unsupported`.
+host does not load, or an import the host does not provide, returns `unsupported`.
 The host validates exported component types. A WIT source checksum also covers
 documentation comments, so a different checksum alone does not reject an analyzer.
 Each admitted role runs its own checks. Analyzers check a sample workflow twice
