@@ -7,7 +7,7 @@ toolchain go1.27.4
 tool actionlint.kjanat.dev/v2/cmd/actionlint
 
 require (
-	actionlint.kjanat.dev/v2 v2.0.0-20261124150024-edb9aba21d75
+	actionlint.kjanat.dev/v2 v2.0.0-20261124160525-9e94d8ce4de9
 	golang.org/x/mod v0.43.0
 )
 
