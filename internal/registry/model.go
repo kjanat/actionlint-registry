@@ -198,6 +198,7 @@ type Entry struct {
 	IdentityVersion   int                   `json:"identity_version,omitempty"`
 	RecordVersion     int                   `json:"record_version,omitempty"`
 	Artifact          *artifact.Declaration `json:"artifact,omitempty"`
+	OCIPrimaryLayers  []string              `json:"oci_primary_layers,omitempty"`
 	Submission        Submission            `json:"submission"`
 	Receipt           Receipt               `json:"receipt"`
 	OwnerID           int64                 `json:"owner_id"`
@@ -284,6 +285,23 @@ func (e Entry) PinnedURL() string {
 	return e.URL + "#sha256=" + e.Submission.Digest()
 }
 
+func (e Entry) validatePrimaryLayers() error {
+	if len(e.OCIPrimaryLayers) == 0 {
+		return nil
+	}
+	if !e.Submission.IsOCI() {
+		return errors.New("only OCI releases can record primary layers")
+	}
+	previous := ""
+	for _, digest := range e.OCIPrimaryLayers {
+		if !digestPattern.MatchString(digest) || digest == e.Submission.Digest() || digest <= previous {
+			return errors.New("OCI primary layer digests must be valid, unique and sorted")
+		}
+		previous = digest
+	}
+	return nil
+}
+
 type Index struct {
 	SchemaVersion int     `json:"schema_version"`
 	Entries       []Entry `json:"entries"`
@@ -296,6 +314,9 @@ func (i *Index) Add(e Entry) error {
 		return errors.New("unsupported index schema_version")
 	}
 	if err := e.Submission.Validate(); err != nil {
+		return err
+	}
+	if err := e.validatePrimaryLayers(); err != nil {
 		return err
 	}
 	if err := e.Receipt.Validate(); err != nil {

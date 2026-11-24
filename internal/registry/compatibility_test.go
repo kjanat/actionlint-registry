@@ -79,7 +79,7 @@ func TestMergeCandidateValidatesOCIEvidenceBeforeWriting(t *testing.T) {
 	evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
 	invalid := observation(entry, "passed")
 	invalid.Report.ArtifactSHA256 = entry.Submission.Digest()
-	valid := layerObservation(entry, strings.Repeat("b", 64))
+	valid := layerObservation(entry, entry.OCIPrimaryLayers[0])
 	if err := MergeCandidate(releases, candidate, []compatibility.Evidence{valid, invalid}, evidence); err == nil || !strings.Contains(err.Error(), "checked layer") {
 		t.Fatalf("merge with invalid evidence: %v", err)
 	}

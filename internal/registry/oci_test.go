@@ -515,10 +515,11 @@ func TestMergeCandidateRequiresEvidence(t *testing.T) {
 		evidence []compatibility.Evidence
 		merged   bool
 	}{
-		"oci without evidence":     {oci, nil, false},
-		"oci with layer evidence":  {oci, []compatibility.Evidence{layerObservation(oci, strings.Repeat("d", 64)), layerObservation(oci, strings.Repeat("e", 64))}, true},
-		"release without evidence": {release, nil, false},
-		"release with evidence":    {release, []compatibility.Evidence{observation(release, "passed")}, true},
+		"oci without evidence":         {oci, nil, false},
+		"oci with layer evidence":      {oci, []compatibility.Evidence{layerObservation(oci, oci.OCIPrimaryLayers[0])}, true},
+		"release without evidence":     {release, nil, false},
+		"release with evidence":        {release, []compatibility.Evidence{observation(release, "passed")}, true},
+		"release with failed evidence": {release, []compatibility.Evidence{observation(release, "failed")}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			directory := t.TempDir()
@@ -602,6 +603,10 @@ func TestOCIReleaseEvidenceCoversEveryPlatformLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	layers := []string{descriptor(ociWASM, linux).Digest, descriptor(ociWASM, darwin).Digest}
+	wantInventory := slices.Sorted(slices.Values([]string{strings.TrimPrefix(layers[0], "sha256:"), strings.TrimPrefix(layers[1], "sha256:")}))
+	if !slices.Equal(admission.Entry.OCIPrimaryLayers, wantInventory) {
+		t.Fatalf("primary layers = %v, want %v", admission.Entry.OCIPrimaryLayers, wantInventory)
+	}
 	if len(admission.Evidence) != 2 {
 		t.Fatalf("admission recorded %d observations for 2 platform layers", len(admission.Evidence))
 	}
@@ -642,6 +647,63 @@ func TestOCIReleaseEvidenceCoversEveryPlatformLayer(t *testing.T) {
 	unbound.Report.ArtifactSHA256 = receipt.Submission.Digest()
 	if err = store.Add(index, unbound); err == nil {
 		t.Fatal("stored OCI evidence that names no checked layer")
+	}
+}
+
+func TestOCIPublicationRequiresCompleteLayerEvidence(t *testing.T) {
+	service, receipt, _ := ociComponentRelease(t, componentLayer("linux"), componentLayer("darwin"))
+	index := EmptyIndex()
+	admission, err := service.Admit(t.Context(), &index, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := admission.Evidence[:1]
+	version := exportedVersion(t, index, partial)
+	if version["imports"] != nil || version["exports"] != nil {
+		t.Fatal("published interfaces with a missing platform report")
+	}
+	legacy := Index{SchemaVersion: 1, Entries: slices.Clone(index.Entries)}
+	legacy.Entries[0].OCIPrimaryLayers = nil
+	version = exportedVersion(t, legacy, admission.Evidence)
+	if version["imports"] != nil || version["exports"] != nil {
+		t.Fatal("published interfaces without a verified layer inventory")
+	}
+	unrelated := admission.Evidence[1]
+	unrelated.Report.ArtifactSHA256 = strings.Repeat("e", 64)
+	failed := admission.Evidence[1]
+	failed.Report.Outcome, failed.Report.Detail = "failed", "fixture is incompatible"
+	for _, tc := range []struct {
+		name         string
+		observations []compatibility.Evidence
+	}{
+		{"missing layer", partial},
+		{"unrelated layer substituted", []compatibility.Evidence{partial[0], unrelated}},
+		{"unrelated extra layer", append(slices.Clone(admission.Evidence), unrelated)},
+		{"failed layer", []compatibility.Evidence{partial[0], failed}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			store := Store{Directory: filepath.Join(root, "plugins")}
+			evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
+			if err := MergeCandidate(store, index, tc.observations, evidence); err == nil {
+				t.Fatal("published OCI candidate with invalid or incomplete evidence")
+			}
+			if current, err := store.Load(); err != nil || len(current.Entries) != 0 {
+				t.Fatalf("release store changed after rejected merge: %+v, %v", current, err)
+			}
+			if stored, err := evidence.Load(EmptyIndex()); err != nil || len(stored) != 0 {
+				t.Fatalf("evidence store changed after rejected merge: %+v, %v", stored, err)
+			}
+		})
+	}
+	root := t.TempDir()
+	store := Store{Directory: filepath.Join(root, "plugins")}
+	evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
+	if err := MergeCandidate(store, index, admission.Evidence, evidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := MergeCandidate(store, index, []compatibility.Evidence{failed}, evidence); err != nil {
+		t.Fatalf("could not record a failed observation for an accepted release: %v", err)
 	}
 }
 
@@ -706,7 +768,6 @@ func TestOCIPlatformWithoutListsPublishesNone(t *testing.T) {
 	unlisted := admission.Evidence[1]
 	unlisted.Report.Outcome, unlisted.Report.Detail = "failed", "validate component contract: newer parser rejects this platform"
 	unlisted.Report.Imports, unlisted.Report.Exports = nil, nil
-	unlisted.Report.ArtifactSHA256 = strings.Repeat("f", 64)
 	version := exportedVersion(t, index, []compatibility.Evidence{admission.Evidence[0], unlisted})
 	if _, found := version["imports"]; found {
 		t.Fatalf("published imports although one platform has no lists: %s", version["imports"])

@@ -54,7 +54,7 @@ type VersionLink struct {
 	Exports       []string            `json:"exports,omitzero"`
 }
 
-func interfaceFacts(observations []compatibility.Evidence) (imports, exports []string) {
+func interfaceFacts(entry Entry, observations []compatibility.Evidence) (imports, exports []string) {
 	listed := map[string]bool{}
 	for _, item := range observations {
 		listed[item.Report.ArtifactSHA256] = listed[item.Report.ArtifactSHA256] || item.Report.HasInterfaces()
@@ -62,6 +62,16 @@ func interfaceFacts(observations []compatibility.Evidence) (imports, exports []s
 	for _, found := range listed {
 		if !found {
 			return nil, nil
+		}
+	}
+	if entry.Submission.IsOCI() {
+		if len(entry.OCIPrimaryLayers) == 0 {
+			return nil, nil
+		}
+		for _, layer := range entry.OCIPrimaryLayers {
+			if !listed[layer] {
+				return nil, nil
+			}
 		}
 	}
 	for _, item := range observations {
@@ -135,7 +145,7 @@ func export(index Index, directory string, statuses []ReleaseStatus, downloads *
 		filename := key(entry.Submission.Tag) + ".json"
 		link := VersionLink{Version: entry.Submission.Tag, Record: "versions/" + filename, Compatibility: append([]CompatibilityLink{}, observations[entry.Submission.Digest()]...)}
 		if entry.Submission.Kind == "component" {
-			link.Imports, link.Exports = interfaceFacts(releases[entry.Submission.Digest()])
+			link.Imports, link.Exports = interfaceFacts(entry, releases[entry.Submission.Digest()])
 		}
 		manifest.Versions = append(manifest.Versions, link)
 		manifests[id] = manifest

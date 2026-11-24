@@ -152,18 +152,22 @@ process has no inherited registry credentials, but it is not an OS sandbox.
 The versioned [JSON report protocol](../schemas/compatibility.schema.json) records
 `passed`, `failed`, or `unsupported` for a particular artifact, host revision, and
 policy. A checker crash produces no compatibility evidence. Missing evidence means
-untested. Admission and the shared candidate check reject `failed`; `unsupported`
-is admitted. No outcome changes an existing release record. Admission stores its
+untested. Admission, the shared candidate check, and publication of new versions
+reject `failed` reports. A checker may report `unsupported` for an accepted release.
+No outcome changes an existing release record. Admission stores its
 report under `registry/compatibility` together with the accepted record. With
 `--candidate`, `admit` writes the report to the candidate's sibling
 `compatibility` directory unless `--compatibility` names another. `merge` rejects
-a new version that has no report in `--candidate-compatibility`.
+a new version that has no report in `--candidate-compatibility`. An OCI
+candidate must include a report for each distinct verified primary layer.
 
 For an OCI release or candidate, admission, `check` and the shared candidate check
 run the checker on the primary layer of each platform. Each report names the layer
 it hashed in `artifact_sha256`, and its record names the root manifest digest in
-`release_sha256`. Pass the pinned `oci://` reference as `check --artifact`, and add
-`--oci-layout` to read the graph from a local image layout. With `--plugin` and
+`release_sha256`. The accepted version records the verified primary layer
+digests in `oci_primary_layers`. Pass the pinned `oci://` reference as
+`check --artifact`, and add `--oci-layout` to read the graph from a local image
+layout. With `--plugin` and
 `--version`, the reference must equal the accepted release's reference, and the
 registry stores and links the records under its root digest. Without them, `check`
 prints one record per line, and `--report` writes the records as a JSON array.
@@ -200,10 +204,11 @@ version entry in its plugin `index.json`:
 }
 ```
 
-The entry omits both lists when a checked file, such as one OCI platform layer, has
-no report that lists them, or when the reports disagree, as OCI platform layers
-with different exports do. actionlint then checks the downloaded bytes. Running `check --plugin --version` with a
-protocol 3 checker over a published version adds the lists to its entry.
+Export includes both lists when the reports agree and every expected artifact
+has a report that lists them. OCI versions accepted before the registry recorded
+layer digests omit the lists. actionlint checks the downloaded bytes in either case.
+Running `check --plugin --version` with a protocol 3 checker can supply missing
+lists for a version with known coverage.
 
 For release preparation, the [shared candidate check](publishing.md) also installs
 the exact local bytes through actionlint and executes a publisher-supplied fixture.
