@@ -71,10 +71,11 @@ compatibility claim.
 For `kjanat:actionlint/runner-provider@0.2.0` and `@0.3.0`, `descriptor` contains
 the provider's `name`, `version` and `targets` from its runtime `describe()`
 result. The Wasm compatibility adapter compares all three fields and exercises
-the provider with a missing snapshot. It rejects a support catalogue that fails
-the host's catalogue validation. Targets describe supported platforms, so their order does
-not affect the comparison. The package `id`, display `name` and `plugin_version`
-identify the distributed release and may differ from the provider descriptor.
+the provider with a missing snapshot through actionlint's own runner resolution,
+which rejects invalid answers and support catalogues. Targets describe supported
+platforms, so their order does not affect the comparison. The package `id`,
+display `name` and `plugin_version` identify the distributed release and may
+differ from the provider descriptor.
 
 ## Process manifests
 
@@ -149,7 +150,9 @@ The versioned [JSON report protocol](../schemas/compatibility.schema.json) recor
 `passed`, `failed`, or `unsupported` for a particular artifact, host revision, and
 policy. A checker crash produces no compatibility evidence. Missing evidence means
 untested. Admission and the shared candidate check reject `failed`; `unsupported`
-is admitted. No outcome changes an existing release record.
+is admitted. No outcome changes an existing release record. `runner_as_of` records
+the runner assessment date the checker used. Run the bundled checker with
+`--runner-as-of <date>` to repeat a check with that date.
 
 For release preparation, the [shared candidate check](publishing.md) also installs
 the exact local bytes through actionlint and executes a publisher-supplied fixture.

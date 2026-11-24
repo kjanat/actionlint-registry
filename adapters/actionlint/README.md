@@ -13,7 +13,8 @@ go -C adapters/actionlint build -o ../../actionlint-checker .
 ```
 
 The executable accepts one local artifact path and writes one JSON compatibility
-report to stdout. Run it through the registry's `check` command to verify the
+report to stdout. The report's `runner_as_of` is the runner assessment date. It is
+the current UTC date unless `--runner-as-of YYYY-MM-DD` sets it. Run it through the registry's `check` command to verify the
 accepted artifact's checksum, isolate inherited credentials, and store the report.
 The process boundary does not provide an operating-system sandbox.
 
@@ -25,8 +26,8 @@ A template-effects extension must match its script-engine version.
 The host validates exported component types. A WIT source checksum also covers
 documentation comments, so a different checksum alone does not reject an analyzer.
 Script engines validate default options and repeated diagnostic calls. Runner
-providers resolve a selector with missing evidence for each declared target and
-return a valid support catalogue;
+providers resolve a workflow's runner selector with missing evidence for each
+declared target, through the host's runner resolution;
 vendor-specific snapshot behavior belongs in the publisher's candidate fixtures.
 Unknown contracts return `unsupported`; understood contracts that fail validation
 return `failed`. Admission and the shared candidate check reject `failed`.

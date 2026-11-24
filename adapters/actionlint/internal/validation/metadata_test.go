@@ -74,7 +74,7 @@ func TestAdmissionRequiresEmbeddedMetadata(t *testing.T) {
 		if err := os.WriteFile(path, unpackagedFixture(t, name), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := Validate(t.Context(), path)
+		_, err := Validate(t.Context(), testAsOf, path)
 		if err == nil || !strings.Contains(err.Error(), "custom section") {
 			t.Fatalf("%s: expected missing metadata, got %v", name, err)
 		}
@@ -88,7 +88,7 @@ func TestEmbeddedComponentDescriptorMustMatchRuntime(t *testing.T) {
 		strings.Replace(componentMetadata, `"scripts","invocations"`, `"scripts","dependencies"`, 1),
 		strings.Replace(componentMetadata, `"options_schema":{}`, `"options_schema":{"type":"object"}`, 1),
 	} {
-		_, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata))
+		_, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata))
 		if err == nil || !strings.Contains(err.Error(), "differs from runtime") {
 			t.Fatalf("expected static/runtime mismatch, got %v", err)
 		}
@@ -97,7 +97,7 @@ func TestEmbeddedComponentDescriptorMustMatchRuntime(t *testing.T) {
 
 func TestComponentPackageIdentityDiffersFromRuleName(t *testing.T) {
 	metadata := strings.Replace(componentMetadata, `"id":"no-sudo"`, `"id":"example/package"`, 1)
-	result, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata))
+	result, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestComponentPackageIdentityDiffersFromRuleName(t *testing.T) {
 
 func TestPreservesCompleteEmbeddedMetadata(t *testing.T) {
 	metadata := strings.Replace(componentMetadata, `"metadata_version":1`, `"metadata_version":1,"publisher_extra":{"nested":["preserved",123]}`, 1)
-	result, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata))
+	result, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestPreservesCompleteEmbeddedMetadata(t *testing.T) {
 
 func TestMalformedMetadataSectionsRejected(t *testing.T) {
 	for _, metadata := range []string{`null`, `{`, `{"id":"a","id":"b"}`, strings.Repeat(" ", (1<<20)+1)} {
-		if _, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata)); err == nil {
+		if _, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata)); err == nil {
 			t.Fatal("invalid or oversized custom section accepted")
 		}
 	}
@@ -128,7 +128,7 @@ func TestMalformedMetadataSectionsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Validate(t.Context(), appendFixtureMetadata(t, module, componentMetadata)); err == nil || !strings.Contains(err.Error(), "duplicate") {
+	if _, err := Validate(t.Context(), testAsOf, appendFixtureMetadata(t, module, componentMetadata)); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("duplicate custom section: %v", err)
 	}
 }
@@ -144,7 +144,7 @@ func TestCoreStaticRuntimeMismatch(t *testing.T) {
 	if err := os.WriteFile(path, module, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Validate(t.Context(), path); err == nil || !strings.Contains(err.Error(), "metadata") {
+	if _, err := Validate(t.Context(), testAsOf, path); err == nil || !strings.Contains(err.Error(), "metadata") {
 		t.Fatalf("core static/runtime mismatch: %v", err)
 	}
 }

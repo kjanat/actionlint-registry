@@ -27,7 +27,7 @@ func TestProcessManifestCompatibilityUnsupported(t *testing.T) {
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Validate(t.Context(), path); !errors.Is(err, ErrUnsupportedContract) {
+		if _, err := Validate(t.Context(), testAsOf, path); !errors.Is(err, ErrUnsupportedContract) {
 			t.Fatal("process became a failed WASM compatibility check", err)
 		}
 	}

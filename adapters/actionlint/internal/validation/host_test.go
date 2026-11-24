@@ -7,7 +7,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -25,6 +27,8 @@ var hostFixtures = map[string]string{
 	"component-wrong-record":          "internal/plugins/pluginexecution/component/testdata/contracts/wrong-record.wasm",
 	"component-wrong-signature":       "internal/plugins/pluginexecution/component/testdata/contracts/wrong-signature.wasm",
 }
+
+var testAsOf = lifecycle.DateOf(time.Date(2026, time.December, 8, 0, 0, 0, 0, time.UTC))
 
 var hostDirectory = sync.OnceValues(func() (string, error) {
 	output, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", hostModule).Output()

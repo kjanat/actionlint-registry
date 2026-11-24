@@ -17,7 +17,7 @@ import (
 )
 
 func TestCompatibleComponent(t *testing.T) {
-	result, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", componentMetadata))
+	result, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", componentMetadata))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestRuntimeRejections(t *testing.T) {
 			if strings.HasPrefix(name, "core-") {
 				metadata = coreMetadata
 			}
-			if _, err := Validate(t.Context(), packagedFixture(t, name, metadata)); err == nil {
+			if _, err := Validate(t.Context(), testAsOf, packagedFixture(t, name, metadata)); err == nil {
 				t.Fatal("invalid host contract accepted")
 			}
 		})
@@ -72,14 +72,14 @@ func TestMalformedAndRemoteRejections(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, input := range []string{path, filepath.Dir(path), "https://example.invalid/plugin.wasm"} {
-		if _, err := Validate(t.Context(), input); err == nil {
+		if _, err := Validate(t.Context(), testAsOf, input); err == nil {
 			t.Fatalf("accepted %q", input)
 		}
 	}
 }
 
 func TestCoreFixture(t *testing.T) {
-	result, err := Validate(t.Context(), coreFixture(t, coreMetadata))
+	result, err := Validate(t.Context(), testAsOf, coreFixture(t, coreMetadata))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestCoreFixture(t *testing.T) {
 }
 
 func TestCoreRejectsMetadataVersion(t *testing.T) {
-	_, err := Validate(t.Context(), coreFixture(t, strings.Replace(coreMetadata, `"metadata_version":1`, `"metadata_version":2`, 1)))
+	_, err := Validate(t.Context(), testAsOf, coreFixture(t, strings.Replace(coreMetadata, `"metadata_version":1`, `"metadata_version":2`, 1)))
 	if err == nil || !strings.Contains(err.Error(), "metadata_version") {
 		t.Fatalf("expected metadata version rejection, got %v", err)
 	}
@@ -104,7 +104,7 @@ func TestCoreRejectsUnusableRegistration(t *testing.T) {
 		"builtin-collision":      strings.ReplaceAll(coreMetadata, `"name":"smoke"`, `"name":"expression-type"`),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Validate(t.Context(), coreFixture(t, metadata)); err == nil {
+			if _, err := Validate(t.Context(), testAsOf, coreFixture(t, metadata)); err == nil {
 				t.Fatal("accepted a core plugin the application cannot register or invoke")
 			}
 		})
@@ -131,7 +131,7 @@ func TestBundledBackendsSupplyTheirOwnShellSelection(t *testing.T) {
 	metadata := strings.Replace(coreMetadata, `"capabilities":{"script_shells":["bash"]},`, "", 1)
 	metadata = strings.ReplaceAll(metadata, `"name":"smoke"`, `"name":"ruff"`)
 	response := `{"ok":true,"diagnostics":[{"filename":"registry-smoke.py","code":"F821","message":"Undefined name","location":{"row":1,"column":7},"end_location":{"row":1,"column":14}}]}`
-	result, err := Validate(t.Context(), coreFixtureResponse(t, metadata, response))
+	result, err := Validate(t.Context(), testAsOf, coreFixtureResponse(t, metadata, response))
 	if err != nil || result.Kind != "core" {
 		t.Fatalf("Ruff-compatible plugin without generic selectors: %+v %v", result, err)
 	}

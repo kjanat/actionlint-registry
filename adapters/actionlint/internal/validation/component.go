@@ -11,6 +11,7 @@ import (
 	"actionlint.kjanat.dev/v2/internal/checking/scriptanalysis/registry"
 	"actionlint.kjanat.dev/v2/internal/input/workspace"
 	"actionlint.kjanat.dev/v2/internal/model/checkinputs"
+	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
 	"actionlint.kjanat.dev/v2/internal/model/rule"
 	"actionlint.kjanat.dev/v2/internal/plugins/pluginexecution/component"
 	results "actionlint.kjanat.dev/v2/internal/results"
@@ -24,7 +25,7 @@ func loadComponent(ctx context.Context, path string) (*component.Plugin, error) 
 	return component.LoadComponentPlugin(ctx, path, component.Options{ReservedRules: checking.BuiltinRuleNames(), Timeout: callTimeout, MemoryPages: 1024})
 }
 
-func validateComponent(ctx context.Context, path string, metadata embeddedMetadata) (result Result, err error) {
+func validateComponent(ctx context.Context, path string, metadata embeddedMetadata, asOf lifecycle.Date) (result Result, err error) {
 	plugin, err := loadComponent(ctx, path)
 	if err != nil {
 		return result, err
@@ -34,7 +35,7 @@ func validateComponent(ctx context.Context, path string, metadata embeddedMetada
 	case scriptInterface, scriptInterface03:
 		return validateScriptComponent(ctx, plugin)
 	case runnerInterface, runnerInterface03:
-		return validateRunnerComponent(ctx, plugin, metadata)
+		return validateRunnerComponent(ctx, plugin, metadata, asOf)
 	}
 	if !plugin.HasAnalyzer() {
 		return result, errors.New("component does not implement its declared analyzer role")

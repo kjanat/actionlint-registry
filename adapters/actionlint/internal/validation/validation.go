@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
 	"actionlint.kjanat.dev/v2/internal/model/rule"
 	"actionlint.kjanat.dev/v2/internal/model/scriptengine"
 	pluginartifact "actionlint.kjanat.dev/v2/internal/plugins/artifacts"
@@ -34,11 +35,15 @@ type Result struct {
 	Repository    string          `json:"repository"`
 	Contract      string          `json:"contract"`
 	PolicyVersion string          `json:"policy_version"`
+	RunnerAsOf    string          `json:"runner_as_of,omitempty"`
 }
 
 // Validate accepts only a snapshot stored in a local regular file. The caller must
 // verify its checksum before calling Validate and keep the file unchanged until it returns.
-func Validate(ctx context.Context, path string) (Result, error) {
+func Validate(ctx context.Context, runnerAsOf lifecycle.Date, path string) (Result, error) {
+	if runnerAsOf.IsZero() {
+		return Result{}, errors.New("validation requires a runner assessment date")
+	}
 	if strings.Contains(path, "://") {
 		return Result{}, errors.New("validation requires a local snapshot")
 	}
@@ -74,7 +79,7 @@ func Validate(ctx context.Context, path string) (Result, error) {
 	case pluginartifact.Core:
 		result, err = validateCore(ctx, path)
 	case pluginartifact.Component:
-		result, err = validateComponent(ctx, path, manifest)
+		result, err = validateComponent(ctx, path, manifest, runnerAsOf)
 	default:
 		return Result{}, errors.New("unsupported artifact kind")
 	}

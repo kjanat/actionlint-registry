@@ -15,21 +15,21 @@ const runnerContractDigest = "2a995ebe267d4d5df5664c0f6f48b40cc770116ef9375935f2
 func TestAnalyzerCompatibilityUsesExportedTypes(t *testing.T) {
 	for _, digest := range []string{componentContractDigest, "a0096f562ab3da46b30d0f025ad1c6ed0d46e5b7ea1a53660b3214e3270fcbee"} {
 		metadata := strings.Replace(componentMetadata, componentContractDigest, digest, 1)
-		result, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata))
+		result, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if result.Contract != componentInterface+"#sha256="+digest {
 			t.Fatalf("changed declared source identity: %s", result.Contract)
 		}
-		_, err = Validate(t.Context(), packagedFixture(t, "component-wrong-record", metadata))
+		_, err = Validate(t.Context(), testAsOf, packagedFixture(t, "component-wrong-record", metadata))
 		if err == nil || errors.Is(err, ErrUnsupportedContract) {
 			t.Fatalf("wrong types must fail runtime validation: %v", err)
 		}
 	}
 	for _, invalid := range []string{"", "invalid", strings.Repeat("A", 64), strings.Repeat("0", 63)} {
 		metadata := strings.Replace(componentMetadata, componentContractDigest, invalid, 1)
-		if _, err := Validate(t.Context(), packagedFixture(t, "component-no-sudo", metadata)); err == nil {
+		if _, err := Validate(t.Context(), testAsOf, packagedFixture(t, "component-no-sudo", metadata)); err == nil {
 			t.Fatal("accepted malformed digest")
 		}
 	}

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
-	"actionlint.kjanat.dev/v2/internal/base/sourcetext"
+	"actionlint.kjanat.dev/v2/internal/checking"
+	"actionlint.kjanat.dev/v2/internal/input/workspace"
 	"actionlint.kjanat.dev/v2/internal/model/lifecycle"
 	"actionlint.kjanat.dev/v2/internal/model/rule"
 	"actionlint.kjanat.dev/v2/internal/model/runners/runnerapi"
@@ -54,15 +54,18 @@ func validateScriptComponent(ctx context.Context, plugin *component.Plugin) (Res
 		Checks: []string{"host-wit-contract", "script-engine", "rule-descriptors", "application-registration", "default-config", "repeated-sample", "diagnostic-ranges"}}, nil
 }
 
-func validateRunnerComponent(ctx context.Context, plugin *component.Plugin, metadata embeddedMetadata) (Result, error) {
+func validateRunnerComponent(ctx context.Context, plugin *component.Plugin, metadata embeddedMetadata, asOf lifecycle.Date) (Result, error) {
 	if !plugin.HasRunnerProvider() {
 		return Result{}, errors.New("component does not implement its declared runner-provider role")
 	}
-	return checkRunnerProvider(ctx, plugin, metadata)
+	return checkRunnerProvider(ctx, runnerapi.Registration{Provider: plugin, ImplementationID: plugin.ArtifactDigest()}, metadata, asOf)
 }
 
-func checkRunnerProvider(ctx context.Context, provider runnerapi.Provider, metadata embeddedMetadata) (Result, error) {
-	descriptor := provider.RunnerDescriptor()
+const runnerWorkflow = "name: Registry runner smoke\non: push\njobs:\n  smoke:\n    runs-on: registry-smoke\n    steps:\n      - run: echo ok\n"
+const runnerScope = "registry-smoke"
+
+func checkRunnerProvider(ctx context.Context, registration runnerapi.Registration, metadata embeddedMetadata, asOf lifecycle.Date) (Result, error) {
+	descriptor := registration.Provider.RunnerDescriptor()
 	declared, err := decodeDescriptor[runnerDeclaration](metadata.Descriptor)
 	if err != nil {
 		return Result{}, err
@@ -72,23 +75,16 @@ func checkRunnerProvider(ctx context.Context, provider runnerapi.Provider, metad
 	}
 	// A generic checker has no vendor dataset. Missing evidence must still produce
 	// a valid answer for each selector, without fetching resources during analysis.
-	asOf := lifecycle.DateOf(time.Now())
 	for _, target := range descriptor.Targets {
-		request := runnerapi.Request{AsOf: asOf, Target: target, Scope: "registry-smoke", Snapshot: runnerapi.RunnerSnapshot{Scope: "registry-smoke", Freshness: runnerapi.Missing},
-			Selectors: []runnerapi.Selector{{Labels: []runnerapi.Constraint{{Value: runnerapi.Literal("registry-smoke"), Position: sourcetext.Position{Line: 1, Column: 1}}}}}}
+		options := checking.Options{
+			Runners: runnerapi.Options{AsOf: asOf, Target: target, Provider: descriptor.Name, Scope: runnerScope,
+				Snapshot: runnerapi.RunnerSnapshot{Scope: runnerScope, Freshness: runnerapi.Missing}, Providers: []runnerapi.Registration{registration}}}
 		for attempt := range 2 {
-			response, err := provider.ResolveRunners(ctx, request)
-			if err != nil {
-				return Result{}, fmt.Errorf("runner invocation %d: %w", attempt+1, err)
-			}
-			if len(response.Answers) != len(request.Selectors) {
-				return Result{}, errors.New("runner returned the wrong answer count")
-			}
-			if err := runnerapi.ValidateSupportCatalog(response.Support, request.Scope); err != nil {
+			if _, err := checking.Analyze(ctx, options, []workspace.InputFile{{Path: samplePath, Content: []byte(runnerWorkflow)}}); err != nil {
 				return Result{}, fmt.Errorf("runner invocation %d: %w", attempt+1, err)
 			}
 		}
 	}
-	return Result{Kind: "component", PluginID: metadata.ID, Rules: []string{}, HostCommit: HostCommit,
-		Checks: []string{"host-wit-contract", "runner-provider", "runner-descriptor", "missing-snapshot", "runner-support", "repeated-sample"}}, nil
+	return Result{Kind: "component", PluginID: metadata.ID, Rules: []string{}, HostCommit: HostCommit, RunnerAsOf: asOf.String(),
+		Checks: []string{"host-wit-contract", "runner-provider", "runner-descriptor", "missing-snapshot", "host-resolution", "repeated-sample"}}, nil
 }
