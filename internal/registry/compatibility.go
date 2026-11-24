@@ -69,12 +69,20 @@ func acceptedRelease(index Index, evidence compatibility.Evidence) error {
 }
 
 func (store EvidenceStore) Add(index Index, evidence compatibility.Evidence) error {
+	if err := validateEvidence(index, evidence); err != nil {
+		return err
+	}
+	return store.write(evidence)
+}
+
+func validateEvidence(index Index, evidence compatibility.Evidence) error {
 	if err := evidence.Validate(); err != nil {
 		return err
 	}
-	if err := acceptedRelease(index, evidence); err != nil {
-		return err
-	}
+	return acceptedRelease(index, evidence)
+}
+
+func (store EvidenceStore) write(evidence compatibility.Evidence) error {
 	name, err := evidenceName(evidence)
 	if err != nil {
 		return err
@@ -100,6 +108,20 @@ func (store EvidenceStore) Add(index Index, evidence compatibility.Evidence) err
 	}
 	if !bytes.Equal(old, append(data, '\n')) {
 		return errors.New("refusing to replace compatibility evidence")
+	}
+	return nil
+}
+
+func (store EvidenceStore) addAll(index Index, observations []compatibility.Evidence) error {
+	for _, observation := range observations {
+		if err := validateEvidence(index, observation); err != nil {
+			return err
+		}
+	}
+	for _, observation := range observations {
+		if err := store.write(observation); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -162,32 +184,22 @@ func (store EvidenceStore) Load(index Index) ([]compatibility.Evidence, error) {
 // MergeCandidate merges admitted records and their compatibility evidence. A
 // version the store does not hold yet needs evidence for its digest.
 func MergeCandidate(store Store, candidate Index, candidateEvidence []compatibility.Evidence, evidence EvidenceStore) error {
-	current, err := store.Load()
-	if err != nil {
-		return err
-	}
-	for _, entry := range candidate.Entries {
-		if slices.ContainsFunc(current.Entries, func(old Entry) bool { return old.Submission == entry.Submission }) {
-			continue
+	return store.merge(candidate, func(current, merged Index) error {
+		for _, entry := range candidate.Entries {
+			if slices.ContainsFunc(current.Entries, func(old Entry) bool { return old.Submission == entry.Submission }) {
+				continue
+			}
+			if !slices.ContainsFunc(candidateEvidence, func(e compatibility.Evidence) bool { return e.Release() == entry.Submission.Digest() }) {
+				return reject(entry.Name() + "@" + entry.Submission.Tag + " has no compatibility evidence")
+			}
 		}
-		if !slices.ContainsFunc(candidateEvidence, func(e compatibility.Evidence) bool { return e.Release() == entry.Submission.Digest() }) {
-			return reject(entry.Name() + "@" + entry.Submission.Tag + " has no compatibility evidence")
-		}
-	}
-	if err = store.Merge(candidate); err != nil {
-		return err
-	}
-	if len(candidateEvidence) == 0 {
-		return nil
-	}
-	merged, err := store.Load()
-	if err != nil {
-		return err
-	}
-	for _, observation := range candidateEvidence {
-		if err = evidence.Add(merged, observation); err != nil {
-			return err
-		}
-	}
-	return nil
+		return evidence.addAll(merged, candidateEvidence)
+	})
+}
+
+// MergeAdmission writes any checker evidence before accepting the admission.
+func (store Store) MergeAdmission(candidate Index, observations []compatibility.Evidence, evidence EvidenceStore) error {
+	return store.merge(candidate, func(_, merged Index) error {
+		return evidence.addAll(merged, observations)
+	})
 }

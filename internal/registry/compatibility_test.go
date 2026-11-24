@@ -23,6 +23,74 @@ func observation(entry Entry, outcome string) compatibility.Evidence {
 	}
 	return compatibility.Evidence{Report: compatibility.Report{SchemaVersion: 1, ArtifactSHA256: entry.Submission.SHA256, Host: compatibility.Host{Name: "test-host", Revision: "revision-a"}, Policy: "smoke/1", Outcome: outcome, Checks: []string{"host-abi"}, Detail: detail}, CheckerSHA256: strings.Repeat("a", 64), ObservedAt: time.Now().UTC()}
 }
+
+func TestMergeWritesEvidenceBeforeAcceptingRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		merge func(Store, Index, []compatibility.Evidence, EvidenceStore) error
+	}{
+		{"admit", Store.MergeAdmission},
+		{"merge candidate", MergeCandidate},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := acceptedFixture(t)
+			candidate := EmptyIndex()
+			if err := candidate.Add(entry); err != nil {
+				t.Fatal(err)
+			}
+			root := t.TempDir()
+			releases := Store{Directory: filepath.Join(root, "plugins")}
+			evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
+			observations := []compatibility.Evidence{observation(entry, "passed")}
+			if err := os.WriteFile(evidence.Directory, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.merge(releases, candidate, observations, evidence); err == nil {
+				t.Fatal("accepted a release when its evidence could not be written")
+			}
+			if index, err := releases.Load(); err != nil || len(index.Entries) != 0 {
+				t.Fatalf("releases after failed write: %+v, %v", index, err)
+			}
+			if err := os.Remove(evidence.Directory); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.merge(releases, candidate, observations, evidence); err != nil {
+				t.Fatal(err)
+			}
+			index, err := releases.Load()
+			if err != nil || len(index.Entries) != 1 {
+				t.Fatalf("releases after retry: %+v, %v", index, err)
+			}
+			if stored, err := evidence.Load(index); err != nil || len(stored) != 1 {
+				t.Fatalf("evidence after retry: %+v, %v", stored, err)
+			}
+		})
+	}
+}
+
+func TestMergeCandidateValidatesOCIEvidenceBeforeWriting(t *testing.T) {
+	entry := ociCandidate(t)
+	candidate := EmptyIndex()
+	if err := candidate.Add(entry); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	releases := Store{Directory: filepath.Join(root, "plugins")}
+	evidence := EvidenceStore{Directory: filepath.Join(root, "compatibility")}
+	invalid := observation(entry, "passed")
+	invalid.Report.ArtifactSHA256 = entry.Submission.Digest()
+	valid := layerObservation(entry, strings.Repeat("b", 64))
+	if err := MergeCandidate(releases, candidate, []compatibility.Evidence{valid, invalid}, evidence); err == nil || !strings.Contains(err.Error(), "checked layer") {
+		t.Fatalf("merge with invalid evidence: %v", err)
+	}
+	if index, err := releases.Load(); err != nil || len(index.Entries) != 0 {
+		t.Fatalf("releases after invalid evidence: %+v, %v", index, err)
+	}
+	if stored, err := evidence.Load(EmptyIndex()); err != nil || len(stored) != 0 {
+		t.Fatalf("evidence after invalid evidence: %+v, %v", stored, err)
+	}
+}
+
 func TestCompatibilityEvidenceDoesNotRewriteRelease(t *testing.T) {
 	entry := acceptedFixture(t)
 	index := EmptyIndex()

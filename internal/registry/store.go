@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -161,14 +162,19 @@ func (s Store) Load() (Index, error) {
 // Merge validates every candidate record before writing any of them. The publication
 // workflow permits only one writer at a time, and existing immutable files are never replaced.
 func (s Store) Merge(candidate Index) error {
+	return s.merge(candidate, nil)
+}
+
+func (s Store) merge(candidate Index, beforeWrite func(current, merged Index) error) error {
 	if candidate.SchemaVersion != 1 {
 		return errors.New("unsupported candidate schema_version")
 	}
-	existing, err := s.Load()
+	current, err := s.Load()
 	if err != nil {
 		return err
 	}
-	original := len(existing.Entries)
+	existing := current
+	existing.Entries = slices.Clip(current.Entries)
 	for _, entry := range candidate.Entries {
 		if err = existing.Add(entry); err != nil {
 			return err
@@ -181,7 +187,12 @@ func (s Store) Merge(candidate Index) error {
 			return errors.New("serialized version record exceeds 2 MiB")
 		}
 	}
-	if len(existing.Entries) == original {
+	if beforeWrite != nil {
+		if err = beforeWrite(current, existing); err != nil {
+			return err
+		}
+	}
+	if len(existing.Entries) == len(current.Entries) {
 		return nil
 	}
 	for _, entry := range candidate.Entries {

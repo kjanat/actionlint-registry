@@ -291,12 +291,7 @@ func run(ctx context.Context, args []string) error {
 			if *candidatePath != "" {
 				destination.Directory = *candidatePath
 			}
-			admissionErr = destination.Merge(delta)
-			for _, evidence := range admission.Evidence {
-				if admissionErr == nil {
-					admissionErr = (registry.EvidenceStore{Directory: *evidencePath}).Add(delta, evidence)
-				}
-			}
+			admissionErr = destination.MergeAdmission(delta, admission.Evidence, registry.EvidenceStore{Directory: *evidencePath})
 		}
 		if admissionErr == nil {
 			report.Accepted = append(report.Accepted, entry)
