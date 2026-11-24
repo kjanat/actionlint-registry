@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"registry.actionlint.kjanat.dev/internal/artifact"
+	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
 
 func processBody() []byte {
@@ -469,5 +470,69 @@ func TestProcessAssetInspectionAndCandidate(t *testing.T) {
 	}
 	if _, err := ExportCandidate(t.Context(), path, filepath.Join(t.TempDir(), "catalogue"), EmptyIndex()); err == nil {
 		t.Fatal("unbundled transform accepted")
+	}
+}
+
+func ociCandidate(t *testing.T) Entry {
+	t.Helper()
+	inspector, reference, _ := ociFixture(t, processBody())
+	distribution, err := OCIReference(reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := sampleReceipt()
+	receipt.Submission = Submission{SchemaVersion: 2, Provider: "github", Repository: "publisher/plugin", Tag: "v1.0.0", Kind: "manifest", Artifact: distribution}
+	entry := acceptedFixture(t)
+	entry.Submission = receipt.Submission
+	entry.ReleaseID, entry.AssetID = 0, 0
+	entry.UpstreamImmutable = false
+	entry.URL = reference
+	service := Service{Providers: map[string]ReleaseProvider{"github": ociReleaseProvider{entry}}, InspectOCI: inspector.Inspect}
+	index := EmptyIndex()
+	admitted, err := admitEntry(service.Admit(t.Context(), &index, receipt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return admitted
+}
+
+func TestMergeCandidateRequiresEvidenceExceptForOCI(t *testing.T) {
+	release := acceptedFixture(t)
+	for name, test := range map[string]struct {
+		entry    Entry
+		evidence []compatibility.Evidence
+		merged   bool
+	}{
+		"oci without evidence":     {ociCandidate(t), nil, true},
+		"release without evidence": {release, nil, false},
+		"release with evidence":    {release, []compatibility.Evidence{observation(release, "passed")}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			store := Store{Directory: filepath.Join(directory, "plugins")}
+			evidence := EvidenceStore{Directory: filepath.Join(directory, "compatibility")}
+			candidate := EmptyIndex()
+			if err := candidate.Add(test.entry); err != nil {
+				t.Fatal(err)
+			}
+			err := MergeCandidate(store, candidate, test.evidence, evidence)
+			loaded, loadErr := store.Load()
+			if loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			if !test.merged {
+				if err == nil || FailureDisposition(err) != "rejected" || len(loaded.Entries) != 0 {
+					t.Fatalf("version without evidence merged or retried: %v, %d entries", err, len(loaded.Entries))
+				}
+				return
+			}
+			if err != nil || len(loaded.Entries) != 1 {
+				t.Fatalf("merge failed: %v, %d entries", err, len(loaded.Entries))
+			}
+			stored, err := evidence.Load(loaded)
+			if err != nil || len(stored) != len(test.evidence) {
+				t.Fatalf("merge stored %d evidence records, want %d: %v", len(stored), len(test.evidence), err)
+			}
+		})
 	}
 }

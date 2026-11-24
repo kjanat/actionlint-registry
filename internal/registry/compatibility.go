@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -141,4 +142,39 @@ func (store EvidenceStore) Load(index Index) ([]compatibility.Evidence, error) {
 		}
 	}
 	return result, nil
+}
+
+// MergeCandidate merges admitted records and their compatibility evidence. A
+// version the store does not hold yet needs evidence for its digest, except an
+// OCI version: a checker report names the single file it hashed, while an OCI
+// release is named by its root manifest digest over one or more platform layers.
+func MergeCandidate(store Store, candidate Index, candidateEvidence []compatibility.Evidence, evidence EvidenceStore) error {
+	current, err := store.Load()
+	if err != nil {
+		return err
+	}
+	for _, entry := range candidate.Entries {
+		if entry.Submission.IsOCI() || slices.ContainsFunc(current.Entries, func(old Entry) bool { return old.Submission == entry.Submission }) {
+			continue
+		}
+		if !slices.ContainsFunc(candidateEvidence, func(e compatibility.Evidence) bool { return e.Report.ArtifactSHA256 == entry.Submission.Digest() }) {
+			return reject(entry.Name() + "@" + entry.Submission.Tag + " has no compatibility evidence")
+		}
+	}
+	if err = store.Merge(candidate); err != nil {
+		return err
+	}
+	if len(candidateEvidence) == 0 {
+		return nil
+	}
+	merged, err := store.Load()
+	if err != nil {
+		return err
+	}
+	for _, observation := range candidateEvidence {
+		if err = evidence.Add(merged, observation); err != nil {
+			return err
+		}
+	}
+	return nil
 }

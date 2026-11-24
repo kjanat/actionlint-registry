@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -215,21 +214,7 @@ func run(ctx context.Context, args []string) error {
 				return err
 			}
 		}
-		mergeErr := missingEvidence(index, candidate, evidence)
-		if mergeErr == nil {
-			mergeErr = store.Merge(candidate)
-		}
-		if mergeErr == nil && len(evidence) != 0 {
-			merged, err := store.Load()
-			if err != nil {
-				return err
-			}
-			for _, observation := range evidence {
-				if mergeErr = (registry.EvidenceStore{Directory: *evidencePath}).Add(merged, observation); mergeErr != nil {
-					break
-				}
-			}
-		}
+		mergeErr := registry.MergeCandidate(store, candidate, evidence, registry.EvidenceStore{Directory: *evidencePath})
 		if *reportPath != "" {
 			report := registry.NewReport("merge")
 			for _, entry := range candidate.Entries {
@@ -302,18 +287,6 @@ func run(ctx context.Context, args []string) error {
 	default:
 		return errors.New("unknown registry command")
 	}
-}
-
-func missingEvidence(index, candidate registry.Index, evidence []compatibility.Evidence) error {
-	for _, entry := range candidate.Entries {
-		if slices.ContainsFunc(index.Entries, func(old registry.Entry) bool { return old.Submission == entry.Submission }) {
-			continue
-		}
-		if !slices.ContainsFunc(evidence, func(e compatibility.Evidence) bool { return e.Report.ArtifactSHA256 == entry.Submission.Digest() }) {
-			return fmt.Errorf("%s@%s has no compatibility evidence", entry.Name(), entry.Submission.Tag)
-		}
-	}
-	return nil
 }
 
 func readBounded(path string, limit int64) (data []byte, err error) {

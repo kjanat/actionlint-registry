@@ -156,7 +156,10 @@ is admitted. No outcome changes an existing release record. Admission stores its
 report under `registry/compatibility` together with the accepted record. With
 `--candidate`, `admit` writes the report to the candidate's sibling
 `compatibility` directory unless `--compatibility` names another. `merge` rejects
-a new version that has no report in `--candidate-compatibility`.
+a new version that has no report in `--candidate-compatibility`, except an OCI
+version. OCI releases have no compatibility reports. A checker report names the
+single file it hashed, and an OCI release is named by its root manifest digest
+over one or more platform layers.
 
 Before each check the registry runs the checker with `--protocol`, with a
 5-second limit. A protocol 2 checker prints `2`; a protocol 1 checker treats the
