@@ -62,7 +62,11 @@ func run(ctx context.Context, args []string) error {
 	explicit := map[string]bool{}
 	flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	if args[0] == "admit" && *candidatePath != "" && !explicit["compatibility"] {
-		*evidencePath = filepath.Join(filepath.Dir(*candidatePath), "compatibility")
+		candidate, err := filepath.Abs(*candidatePath)
+		if err != nil {
+			return err
+		}
+		*evidencePath = filepath.Join(filepath.Dir(candidate), "compatibility")
 	}
 	if *ociLayout != "" && args[0] != "inspect" && args[0] != "candidate" {
 		return errors.New("--oci-layout is available only for inspect and candidate")

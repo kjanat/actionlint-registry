@@ -266,34 +266,47 @@ func dayOfCheck(start time.Time, date string) bool {
 }
 
 // defaultEvidenceAdmission repeats the workflow's admission without
-// --compatibility into another candidate directory.
+// --compatibility, with --candidate spelled relative to the working directory.
 func defaultEvidenceAdmission(t *testing.T, root string, admissionArgs []string, digest string) {
 	t.Helper()
-	other := filepath.Join(root, "other/plugins")
-	var args []string
-	for i := 0; i < len(admissionArgs); i++ {
-		switch admissionArgs[i] {
-		case "--compatibility":
-			i++
-		case "--candidate":
-			args = append(args, "--candidate", other)
-			i++
-		default:
-			args = append(args, admissionArgs[i])
-		}
-	}
-	if err := run(t.Context(), args); err != nil {
-		t.Fatal(err)
-	}
-	candidate, err := (registry.Store{Directory: other}).Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if evidence, err := (registry.EvidenceStore{Directory: filepath.Join(root, "other/compatibility")}).Load(candidate); err != nil || len(evidence) != 1 {
-		t.Fatalf("admission without --compatibility did not use the candidate's directory: %+v, %v", evidence, err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "registry/compatibility", digest)); !os.IsNotExist(err) {
-		t.Fatalf("candidate admission wrote evidence into the live registry: %v", err)
+	for name, test := range map[string]struct{ cwd, candidate, store string }{
+		"trailing slash": {root, "trailing/plugins/", filepath.Join(root, "trailing/plugins")},
+		"dot":            {filepath.Join(root, "dot/plugins"), ".", filepath.Join(root, "dot/plugins")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := os.MkdirAll(test.cwd, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(test.cwd)
+			var args []string
+			for i := 0; i < len(admissionArgs); i++ {
+				switch admissionArgs[i] {
+				case "--compatibility":
+					i++
+				case "--candidate":
+					args = append(args, "--candidate", test.candidate)
+					i++
+				default:
+					args = append(args, admissionArgs[i])
+				}
+			}
+			if err := run(t.Context(), args); err != nil {
+				t.Fatal(err)
+			}
+			candidate, err := (registry.Store{Directory: test.store}).Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sibling := filepath.Join(filepath.Dir(test.store), "compatibility")
+			if evidence, err := (registry.EvidenceStore{Directory: sibling}).Load(candidate); err != nil || len(evidence) != 1 {
+				t.Fatalf("admission without --compatibility did not use %s: %+v, %v", sibling, evidence, err)
+			}
+			for _, path := range []string{filepath.Join(test.store, "compatibility"), filepath.Join("registry/compatibility", digest)} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("candidate admission wrote evidence to %s: %v", path, err)
+				}
+			}
+		})
 	}
 }
 
@@ -305,26 +318,36 @@ func TestAdmissionWorkflowCarriesEvidence(t *testing.T) {
 	var document struct {
 		Jobs map[string]struct {
 			Steps []struct {
-				Name, Run string
-				With      map[string]any
+				ID, Name, Uses, Run string
+				With                map[string]any
 			}
 		}
 	}
 	if err = yaml.Unmarshal(workflow, &document); err != nil {
 		t.Fatal(err)
 	}
-	uploads, commits := false, false
+	uploads, downloads, merges, commits := false, false, false, false
 	for _, step := range document.Jobs["validate"].Steps {
 		if path, ok := step.With["path"].(string); ok && step.Name == "Transfer accepted records and lease" {
 			uploads = slices.Contains(strings.Fields(path), "candidate/compatibility/")
 		}
 	}
 	for _, step := range document.Jobs["publish"].Steps {
-		if step.Name == "Commit accepted records as the registry bot" {
+		switch {
+		case strings.HasPrefix(step.Uses, "actions/download-artifact@"):
+			downloads = step.With["name"] == "validated-submission" && step.With["path"] == "accepted"
+		case step.ID == "merge":
+			fields := strings.Fields(step.Run)
+			flag := func(name, value string) bool {
+				index := slices.Index(fields, name)
+				return index >= 0 && index+1 < len(fields) && fields[index+1] == value
+			}
+			merges = flag("--compatibility", "registry/compatibility") && flag("--candidate-compatibility", "accepted/candidate/compatibility")
+		case step.Name == "Commit accepted records as the registry bot":
 			commits = slices.ContainsFunc(strings.Split(step.Run, "\n"), func(line string) bool { return strings.TrimSpace(line) == "git add -- registry/compatibility" })
 		}
 	}
-	if !uploads || !commits {
-		t.Fatalf("admission workflow drops evidence: upload=%t commit=%t", uploads, commits)
+	if !uploads || !downloads || !merges || !commits {
+		t.Fatalf("admission workflow drops evidence: upload=%t download=%t merge=%t commit=%t", uploads, downloads, merges, commits)
 	}
 }
