@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -43,7 +45,7 @@ func run(ctx context.Context, args []string) error {
 	downloadCounts := flags.Bool("download-counts", false, "Refresh GitHub asset download counts when exporting the catalogue.")
 	pluginID := flags.String("plugin", "", "Identify the plugin by provider/repository or host/repository.")
 	checker := flags.String("checker", "", "Trusted checker executable; check records an observation and admit rejects a failed outcome.")
-	evidencePath := flags.String("compatibility", "registry/compatibility", "Read or append host compatibility observations in this directory.")
+	evidencePath := flags.String("compatibility", "registry/compatibility", "Read or append host compatibility observations in this directory; admit --candidate defaults to the candidate's sibling compatibility directory.")
 	candidateEvidencePath := flags.String("candidate-compatibility", "", "Merge the compatibility observations that admission wrote to this directory.")
 	version := flags.String("version", "", "Resolve this exact accepted release tag.")
 	statusPath := flags.String("statuses", "registry/status", "Read or append audited release status events.")
@@ -57,6 +59,11 @@ func run(ctx context.Context, args []string) error {
 	}
 	if flags.NArg() != 0 {
 		return errors.New("this command does not accept positional arguments")
+	}
+	explicit := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	if args[0] == "admit" && *candidatePath != "" && !explicit["compatibility"] {
+		*evidencePath = filepath.Join(filepath.Dir(*candidatePath), "compatibility")
 	}
 	if *ociLayout != "" && args[0] != "inspect" && args[0] != "candidate" {
 		return errors.New("--oci-layout is available only for inspect and candidate")
@@ -208,7 +215,10 @@ func run(ctx context.Context, args []string) error {
 				return err
 			}
 		}
-		mergeErr := store.Merge(candidate)
+		mergeErr := missingEvidence(index, candidate, evidence)
+		if mergeErr == nil {
+			mergeErr = store.Merge(candidate)
+		}
 		if mergeErr == nil && len(evidence) != 0 {
 			merged, err := store.Load()
 			if err != nil {
@@ -292,6 +302,18 @@ func run(ctx context.Context, args []string) error {
 	default:
 		return errors.New("unknown registry command")
 	}
+}
+
+func missingEvidence(index, candidate registry.Index, evidence []compatibility.Evidence) error {
+	for _, entry := range candidate.Entries {
+		if slices.ContainsFunc(index.Entries, func(old registry.Entry) bool { return old.Submission == entry.Submission }) {
+			continue
+		}
+		if !slices.ContainsFunc(evidence, func(e compatibility.Evidence) bool { return e.Report.ArtifactSHA256 == entry.Submission.Digest() }) {
+			return fmt.Errorf("%s@%s has no compatibility evidence", entry.Name(), entry.Submission.Tag)
+		}
+	}
+	return nil
 }
 
 func readBounded(path string, limit int64) (data []byte, err error) {

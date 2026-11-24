@@ -11,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"registry.actionlint.kjanat.dev/internal/compatibility"
 	"registry.actionlint.kjanat.dev/internal/registry"
 )
 
@@ -32,7 +34,6 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "test-token")
 	root := t.TempDir()
-	today := time.Now().UTC().Format(time.DateOnly)
 	storePath := filepath.Join(root, "registry/plugins")
 	candidatePath := filepath.Join(root, "candidate/plugins")
 	receiptPath := filepath.Join(root, "handoff/receipt.json")
@@ -120,8 +121,8 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 		wasm = append(wasm, section...)
 		digest := sha256.Sum256(wasm)
 		receipt.Submission.SHA256 = hex.EncodeToString(digest[:])
-		report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":%q}`, receipt.Submission.SHA256, today)
-		script := "#!/bin/sh\nif [ \"$1\" = --protocol ]; then printf '2\\n'; exit 0; fi\nif [ \"$1\" = --runner-as-of ]; then shift 2; fi\n[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '%s\\n' '" + report + "'\n"
+		report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s"}`, receipt.Submission.SHA256)
+		script := "#!/bin/sh\nif [ \"$1\" = --protocol ]; then printf '2\\n'; exit 0; fi\nif [ \"$1\" = --runner-as-of ]; then date=$2; shift 2; fi\n[ \"$#\" -eq 1 ] && [ -f \"$1\" ] || exit 1\nprintf '" + report + "\\n' \"$date\"\n"
 		if err := os.WriteFile(filepath.Join(root, "registry-checker"), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -149,6 +150,7 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 		t.Fatal("rejected candidate wrote an output store")
 	}
 	prepare("1.1.0", "example")
+	admissionStart := time.Now()
 	if err = run(t.Context(), admissionArgs); err != nil {
 		t.Fatal(err)
 	}
@@ -166,8 +168,15 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 		t.Fatalf("wrong admission delta: %+v, %v", candidate, err)
 	}
 	admitted, err := (registry.EvidenceStore{Directory: filepath.Join(root, "candidate/compatibility")}).Load(candidate)
-	if err != nil || len(admitted) != 1 || admitted[0].Report.RunnerAsOf != today {
+	if err != nil || len(admitted) != 1 || !dayOfCheck(admissionStart, admitted[0].Report.RunnerAsOf) {
 		t.Fatalf("admission did not store its dated evidence: %+v, %v", admitted, err)
+	}
+	defaultEvidenceAdmission(t, root, admissionArgs, candidate.Entries[0].Submission.SHA256)
+	if err = run(t.Context(), []string{"merge", "--store", filepath.Join(root, "bare/plugins"), "--candidate", candidatePath}); err == nil || !strings.Contains(err.Error(), "no compatibility evidence") {
+		t.Fatalf("merge accepted a new version without evidence: %v", err)
+	}
+	if bare, err := (registry.Store{Directory: filepath.Join(root, "bare/plugins")}).Load(); err != nil || len(bare.Entries) != 0 {
+		t.Fatalf("merge without evidence wrote records: %+v, %v", bare, err)
 	}
 	if err = (registry.Store{Directory: filepath.Join(root, "accepted/candidate/plugins")}).Merge(candidate); err != nil {
 		t.Fatal(err)
@@ -184,7 +193,7 @@ func TestAdmissionDeltaAndPublicationConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored, err := (registry.EvidenceStore{Directory: filepath.Join(published, "compatibility")}).Load(merged); err != nil || len(stored) != 1 || stored[0].Report.RunnerAsOf != today {
+	if stored, err := (registry.EvidenceStore{Directory: filepath.Join(published, "compatibility")}).Load(merged); err != nil || len(stored) != 1 || stored[0].Report.RunnerAsOf != admitted[0].Report.RunnerAsOf {
 		t.Fatalf("merge did not publish the admission evidence: %+v, %v", stored, err)
 	}
 	conflict := candidate.Entries[0]
@@ -219,14 +228,23 @@ func recheckReleaseWithStoredDate(t *testing.T, root, storePath string, entry re
 		t.Fatal(err)
 	}
 	argsLog := filepath.Join(root, "checker-args.log")
-	today := time.Now().UTC().Format(time.DateOnly)
+	compatibilityPath := filepath.Join(root, "registry/compatibility")
+	index, err := (registry.Store{Directory: storePath}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const stored = "2026-12-10"
+	seed := compatibility.Evidence{Report: compatibility.Report{SchemaVersion: 2, ArtifactSHA256: entry.Submission.SHA256, Host: compatibility.Host{Name: "actionlint", Revision: "earlier"}, Policy: "actionlint-smoke/1", Outcome: "passed", Checks: []string{"metadata-v1"}, RunnerAsOf: stored},
+		CheckerSHA256: strings.Repeat("a", 64), ObservedAt: time.Now().UTC().Add(-time.Hour)}
+	if err = (registry.EvidenceStore{Directory: compatibilityPath}).Add(index, seed); err != nil {
+		t.Fatal(err)
+	}
 	report := fmt.Sprintf(`{"schema_version":2,"artifact_sha256":%q,"host":{"name":"actionlint","revision":"test"},"policy":"actionlint-smoke/1","outcome":"passed","checks":["metadata-v1"],"runner_as_of":"%%s"}`, entry.Submission.SHA256)
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\nif [ \"$1\" = --protocol ]; then printf '2\\n'; exit 0; fi\n[ \"$1\" = --runner-as-of ] || exit 1\ndate=$2\nprintf '" + report + "\\n' \"$date\"\n"
 	checker := filepath.Join(root, "dated-checker")
 	if err := os.WriteFile(checker, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	compatibilityPath := filepath.Join(root, "registry/compatibility")
 	args := []string{"check", "--store", storePath, "--compatibility", compatibilityPath, "--checker", checker, "--artifact", artifactPath, "--plugin", entry.Name(), "--version", entry.Submission.Tag}
 	for range 2 {
 		if err := run(t.Context(), args); err != nil {
@@ -238,7 +256,75 @@ func recheckReleaseWithStoredDate(t *testing.T, root, storePath string, entry re
 		t.Fatal(err)
 	}
 	calls := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(calls) != 4 || calls[0] != "--protocol" || !strings.HasPrefix(calls[1], "--runner-as-of "+today+" ") || calls[2] != "--protocol" || !strings.HasPrefix(calls[3], "--runner-as-of "+today+" ") {
+	if len(calls) != 4 || calls[0] != "--protocol" || !strings.HasPrefix(calls[1], "--runner-as-of "+stored+" ") || calls[2] != "--protocol" || !strings.HasPrefix(calls[3], "--runner-as-of "+stored+" ") {
 		t.Fatalf("recheck did not replay the stored runner date: %q", calls)
+	}
+}
+
+func dayOfCheck(start time.Time, date string) bool {
+	return date == start.UTC().Format(time.DateOnly) || date == time.Now().UTC().Format(time.DateOnly)
+}
+
+// defaultEvidenceAdmission repeats the workflow's admission without
+// --compatibility into another candidate directory.
+func defaultEvidenceAdmission(t *testing.T, root string, admissionArgs []string, digest string) {
+	t.Helper()
+	other := filepath.Join(root, "other/plugins")
+	var args []string
+	for i := 0; i < len(admissionArgs); i++ {
+		switch admissionArgs[i] {
+		case "--compatibility":
+			i++
+		case "--candidate":
+			args = append(args, "--candidate", other)
+			i++
+		default:
+			args = append(args, admissionArgs[i])
+		}
+	}
+	if err := run(t.Context(), args); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := (registry.Store{Directory: other}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence, err := (registry.EvidenceStore{Directory: filepath.Join(root, "other/compatibility")}).Load(candidate); err != nil || len(evidence) != 1 {
+		t.Fatalf("admission without --compatibility did not use the candidate's directory: %+v, %v", evidence, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "registry/compatibility", digest)); !os.IsNotExist(err) {
+		t.Fatalf("candidate admission wrote evidence into the live registry: %v", err)
+	}
+}
+
+func TestAdmissionWorkflowCarriesEvidence(t *testing.T) {
+	workflow, err := os.ReadFile("../../.github/workflows/admission.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name, Run string
+				With      map[string]any
+			}
+		}
+	}
+	if err = yaml.Unmarshal(workflow, &document); err != nil {
+		t.Fatal(err)
+	}
+	uploads, commits := false, false
+	for _, step := range document.Jobs["validate"].Steps {
+		if path, ok := step.With["path"].(string); ok && step.Name == "Transfer accepted records and lease" {
+			uploads = slices.Contains(strings.Fields(path), "candidate/compatibility/")
+		}
+	}
+	for _, step := range document.Jobs["publish"].Steps {
+		if step.Name == "Commit accepted records as the registry bot" {
+			commits = slices.ContainsFunc(strings.Split(step.Run, "\n"), func(line string) bool { return strings.TrimSpace(line) == "git add -- registry/compatibility" })
+		}
+	}
+	if !uploads || !commits {
+		t.Fatalf("admission workflow drops evidence: upload=%t commit=%t", uploads, commits)
 	}
 }

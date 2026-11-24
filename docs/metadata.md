@@ -153,11 +153,15 @@ The versioned [JSON report protocol](../schemas/compatibility.schema.json) recor
 policy. A checker crash produces no compatibility evidence. Missing evidence means
 untested. Admission and the shared candidate check reject `failed`; `unsupported`
 is admitted. No outcome changes an existing release record. Admission stores its
-report under `registry/compatibility` together with the accepted record.
+report under `registry/compatibility` together with the accepted record. With
+`--candidate`, `admit` writes the report to the candidate's sibling
+`compatibility` directory unless `--compatibility` names another. `merge` rejects
+a new version that has no report in `--candidate-compatibility`.
 
-Before each check the registry runs the checker with `--protocol`. A protocol 2
-checker prints `2`; a protocol 1 checker treats the argument as a missing
-artifact and exits with an error. Protocol 2 reports carry a required
+Before each check the registry runs the checker with `--protocol`, with a
+5-second limit. A protocol 2 checker prints `2`; a protocol 1 checker treats the
+argument as a missing artifact, exits with a non-zero status and prints nothing.
+A probe that times out or ends by a signal fails the check. Protocol 2 reports carry a required
 `runner_as_of`, the runner assessment date the checker used. The registry passes
 every protocol 2 checker `--runner-as-of`. `check --plugin --version` passes the
 date of the version's earliest dated record. Admission, unpublished checks and
