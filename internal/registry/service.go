@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -125,12 +126,31 @@ func (service Service) Admit(ctx context.Context, index *Index, receipt Receipt)
 			if walk == nil {
 				walk = NewOCIInspector().Walk
 			}
-			if service.Checker == "" {
-				return walk(ctx, s.Artifact.Reference(), nil)
+			var primaryLayers []string
+			inspect := func(ctx context.Context, reference string, check OCILayer) (artifact.Declaration, error) {
+				return walk(ctx, reference, func(digest, mediaType string, data []byte) error {
+					primaryLayers = append(primaryLayers, strings.TrimPrefix(digest, "sha256:"))
+					if check != nil {
+						return check(digest, mediaType, data)
+					}
+					return nil
+				})
 			}
-			result, observed, err := CheckOCI(ctx, service.Checker, walk, s.Artifact.Reference(), "")
+			if service.Checker == "" {
+				result, err = inspect(ctx, s.Artifact.Reference(), nil)
+			} else {
+				var observed []compatibility.Evidence
+				result, observed, err = CheckOCI(ctx, service.Checker, inspect, s.Artifact.Reference(), "")
+				if err == nil {
+					err = record(observed)
+				}
+			}
 			if err == nil {
-				err = record(observed)
+				if len(primaryLayers) == 0 {
+					return result, errors.New("verified OCI release has no primary layers")
+				}
+				slices.Sort(primaryLayers)
+				entry.OCIPrimaryLayers = slices.Compact(primaryLayers)
 			}
 			return result, err
 		}

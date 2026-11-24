@@ -56,16 +56,22 @@ func (store EvidenceStore) Recheck(ctx context.Context, index Index, executable,
 }
 
 func acceptedRelease(index Index, evidence compatibility.Evidence) error {
+	matched := false
 	for _, entry := range index.Entries {
-		if entry.Submission.Digest() != evidence.Release() {
+		if entry.Submission.Digest() != evidence.Release() || entry.Submission.IsOCI() != (evidence.ReleaseSHA256 != "") {
 			continue
 		}
-		if entry.Submission.IsOCI() != (evidence.ReleaseSHA256 != "") {
-			return errors.New("OCI evidence must name its release and checked layer; other evidence names only its artifact")
+		if len(entry.OCIPrimaryLayers) != 0 {
+			if _, found := slices.BinarySearch(entry.OCIPrimaryLayers, evidence.Report.ArtifactSHA256); !found {
+				return errors.New("compatibility evidence names a layer outside the verified OCI release")
+			}
 		}
+		matched = true
+	}
+	if matched {
 		return nil
 	}
-	return errors.New("compatibility evidence has no accepted artifact")
+	return errors.New("compatibility evidence has no accepted artifact matching its release binding")
 }
 
 func (store EvidenceStore) Add(index Index, evidence compatibility.Evidence) error {
@@ -195,12 +201,43 @@ func MergeCandidate(store Store, candidate Index, candidateEvidence []compatibil
 			if slices.ContainsFunc(current.Entries, func(old Entry) bool { return old.Submission == entry.Submission }) {
 				continue
 			}
-			if !slices.ContainsFunc(candidateEvidence, func(e compatibility.Evidence) bool { return e.Release() == entry.Submission.Digest() }) {
-				return reject(entry.Name() + "@" + entry.Submission.Tag + " has no compatibility evidence")
+			if err := requireCandidateEvidence(entry, candidateEvidence); err != nil {
+				return err
 			}
 		}
 		return evidence.addAll(merged, candidateEvidence, writes)
 	})
+}
+
+func requireCandidateEvidence(entry Entry, observations []compatibility.Evidence) error {
+	release := entry.Submission.Digest()
+	identity := entry.Name() + "@" + entry.Submission.Tag
+	layers := entry.OCIPrimaryLayers
+	if entry.Submission.IsOCI() && len(layers) == 0 {
+		return reject(identity + " has no verified OCI primary layers")
+	}
+	checked := make(map[string]bool)
+	for _, observation := range observations {
+		if observation.Release() != release {
+			continue
+		}
+		if observation.Report.Outcome == "failed" {
+			return reject(identity + " has failed compatibility evidence")
+		}
+		if entry.Submission.IsOCI() && observation.ReleaseSHA256 == "" {
+			return reject(identity + " has OCI evidence without a checked layer")
+		}
+		checked[observation.Report.ArtifactSHA256] = true
+	}
+	if len(checked) == 0 {
+		return reject(identity + " has no compatibility evidence")
+	}
+	for _, layer := range layers {
+		if !checked[layer] {
+			return reject(identity + " has no compatibility evidence for OCI layer " + layer)
+		}
+	}
+	return nil
 }
 
 // MergeAdmission writes any checker evidence before accepting the admission.
