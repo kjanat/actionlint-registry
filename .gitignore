@@ -2,6 +2,7 @@
 /registry-cli
 /registry-cli.exe
 /dist/
+/.dist.registry-export/
 /reports/
 /node_modules/
 /.tmp/

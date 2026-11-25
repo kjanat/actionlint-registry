@@ -4,22 +4,57 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/rogpeppe/go-internal/lockedfile"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 const exportFiles = ".registry-export-files.json"
 const siteFiles = ".registry-site-files.json"
 
+const exportWorkSuffix = ".registry-export"
+const longExportWorkPrefix = ".registry-export-long-"
+const exportLock = "publish.lock"
+const lockContents = "actionlint-registry export v1\n"
+
 func replaceExport(directory string, build func(string) error) error {
+	return publishExport(directory, build, exchangeExport, os.Rename)
+}
+
+type renameDirectory func(string, string) error
+
+func exportWorkPath(dest string) string {
+	parent, base := filepath.Split(dest)
+	folded := norm.NFD.String(cases.Fold().String(norm.NFD.String(base)))
+	// Pick the same layout across spelling aliases, allowing four UTF-8 bytes per rune.
+	if 1+utf8.UTFMax*utf8.RuneCountInString(folded)+len(exportWorkSuffix) <= 255 {
+		return filepath.Join(parent, "."+base+exportWorkSuffix)
+	}
+	// The basename still distinguishes spellings on case-sensitive filesystems.
+	return filepath.Join(parent, longExportWorkPrefix+key(folded), base)
+}
+
+func publishExport(directory string, build func(string) error, exchange, rename renameDirectory) (err error) {
 	dest, err := filepath.Abs(directory)
 	if err != nil {
 		return err
 	}
 	if err := safePath(dest); err != nil {
 		return err
+	}
+	for p := dest; filepath.Dir(p) != p; p = filepath.Dir(p) {
+		name := strings.ToLower(filepath.Base(p))
+		if strings.HasPrefix(name, ".") && strings.HasSuffix(name, exportWorkSuffix) || strings.HasPrefix(name, longExportWorkPrefix) {
+			return fmt.Errorf("export destination uses reserved directory %s", p)
+		}
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -32,17 +67,26 @@ func replaceExport(directory string, build func(string) error) error {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
-	work, err := os.MkdirTemp(parent, ".registry-export-*")
+	work := exportWorkPath(dest)
+	lock, err := lockExportWork(work)
 	if err != nil {
 		return err
 	}
-	// RemoveAll would also delete the backup if rollback fails.
-	defer func() { _ = os.Remove(work) }()
+	defer func() { err = errors.Join(err, lock.Close()) }()
 	next := filepath.Join(work, "next")
+	previous := filepath.Join(work, "previous")
+	if err := recoverExport(dest, next, previous, rename); err != nil {
+		return err
+	}
 	if err := os.Mkdir(next, 0o755); err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(next) }()
+	keepNext := false
+	defer func() {
+		if !keepNext {
+			err = errors.Join(err, os.RemoveAll(next))
+		}
+	}()
 	if err := build(next); err != nil {
 		return err
 	}
@@ -60,12 +104,18 @@ func replaceExport(directory string, build func(string) error) error {
 		return err
 	}
 
+	if err := safePath(dest); err != nil {
+		return err
+	}
 	info, err := os.Lstat(dest)
 	if errors.Is(err, fs.ErrNotExist) {
-		return os.Rename(next, dest)
+		return rename(next, dest)
 	}
 	if err != nil {
 		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("export destination is not a directory: %s", dest)
 	}
 	if err := os.Chmod(next, info.Mode().Perm()); err != nil {
 		return err
@@ -73,17 +123,112 @@ func replaceExport(directory string, build func(string) error) error {
 	if err := checkExportOutput(dest); err != nil {
 		return err
 	}
-	previous := filepath.Join(work, "previous")
-	if err := os.Rename(dest, previous); err != nil {
+	if err := exchange(next, dest); !errors.Is(err, errors.ErrUnsupported) {
 		return err
 	}
-	if err := os.Rename(next, dest); err != nil {
-		if restoreErr := os.Rename(previous, dest); restoreErr != nil {
-			return fmt.Errorf("replace export directory: %w (could not restore %s: %v)", err, previous, restoreErr)
+	if err := rename(dest, previous); err != nil {
+		return err
+	}
+	if err := rename(next, dest); err != nil {
+		if restoreErr := rename(previous, dest); restoreErr != nil {
+			keepNext = true
+			return fmt.Errorf("install export: %w; restore %s: %w", err, previous, restoreErr)
 		}
 		return err
 	}
 	return os.RemoveAll(previous)
+}
+
+func lockExportWork(work string) (*lockedfile.File, error) {
+	if err := safePath(work); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(work, exportLock)
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) > 0 {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, fmt.Errorf("unrecognized export work directory %s: %w", work, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("invalid export lock %s", path)
+		}
+	}
+	f, err := lockedfile.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkExportWork(f, work); err != nil {
+		return nil, errors.Join(err, f.Close())
+	}
+	return f, nil
+}
+
+func checkExportWork(lock *lockedfile.File, work string) error {
+	contents, err := io.ReadAll(io.LimitReader(lock, int64(len(lockContents)+1)))
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return err
+	}
+	if string(contents) != lockContents {
+		// An interruption while initializing an otherwise empty workspace is recoverable.
+		if len(entries) == 1 && strings.HasPrefix(lockContents, string(contents)) {
+			_, err := lock.WriteString(lockContents[len(contents):])
+			return err
+		}
+		return fmt.Errorf("unrecognized export lock %s", lock.Name())
+	}
+	for _, entry := range entries {
+		if entry.Name() == exportLock || entry.IsDir() && (entry.Name() == "next" || entry.Name() == "previous") {
+			continue
+		}
+		return fmt.Errorf("unexpected entry in export work directory: %s", filepath.Join(work, entry.Name()))
+	}
+	return nil
+}
+
+func recoverExport(dest, next, previous string, rename renameDirectory) error {
+	if _, err := os.Lstat(previous); err == nil {
+		_, err := os.Lstat(dest)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			if err := rename(previous, dest); err != nil {
+				return fmt.Errorf("restore %s from %s: %w", dest, previous, err)
+			}
+		case err != nil:
+			return err
+		default:
+			// Installation consumes next. If both paths exist, a different writer
+			// created the destination during the fallback; keep the backup.
+			if _, err := os.Lstat(next); !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("cannot recover %s while %s and %s exist", previous, dest, next)
+			}
+			if err := safePath(filepath.Join(dest, exportFiles)); err != nil {
+				return err
+			}
+			if _, err := os.Stat(filepath.Join(dest, exportFiles)); err != nil {
+				return fmt.Errorf("keep backup %s: %w", previous, err)
+			}
+			if err := checkExportOutput(dest); err != nil {
+				return err
+			}
+			if err := os.RemoveAll(previous); err != nil {
+				return err
+			}
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return os.RemoveAll(next)
 }
 
 func checkExportOutput(directory string) error {

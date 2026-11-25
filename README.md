@@ -42,6 +42,16 @@ go run ./cmd/registry export --store registry/plugins --output dist --download-c
 Omit `--download-counts` for a network-free export. A refresh has a one-minute
 budget; assets not observed within that budget are marked unavailable.
 
+On filesystems that support atomic directory exchange, a refresh switches `dist/`
+from the old export to the new one in a single operation. Elsewhere, `dist/` can
+briefly disappear between renames. If an export is interrupted, rerun it with
+the same `--output` path. The exporter uses `.dist.registry-export/` beside the
+output to recover the previous export or clean up after a completed switch.
+
+Older exporters saved backups under `.registry-export-*/previous/` without
+recording the output path. If an interrupted run left your output missing,
+identify its backup and move `previous/` back to the original path before retrying.
+
 ## Catalogue website
 
 The Go registry exports JSON only. The separate TypeScript application in [`site/`](site/)
