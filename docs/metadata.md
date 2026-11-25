@@ -13,17 +13,11 @@ of the authenticated release repository. The version must match the release tag
 after removing at most one leading lowercase `v` from each. License information is
 a publisher declaration, not an independent license audit.
 
-Use JSON Schema Draft 2020-12 for `config_schema`, `rules[].options_schema`
-and `descriptor.options_schema`. Put shared definitions in that schema's
-`$defs`, then refer to them with a path such as `#/$defs/severity`. The registry
-checks every definition offline and rejects missing targets and duplicate `$id`
-values within a schema. Give each rule with options a non-empty `category` and
-`name`. Each pair must be unique within the plugin version.
-
-The version record keeps every metadata field and its exact JSON numbers.
-The catalogue leaves the description blank on older records that stored it as
-something other than a string. Each exported schema has version-specific
-resource IDs, so an editor can load two plugin versions together.
+If your plugin accepts settings, put their JSON Schema in `config_schema`.
+For rule options, put `options_schema` on the rule in `rules[]` or `descriptor`.
+Each rule with options needs a non-empty `category` and `name`. Use a different
+pair for each rule. Write these schemas in Draft 2020-12 and keep any `$ref`
+targets inside the schema that uses them.
 
 ## Multiple plugins in one repository
 
