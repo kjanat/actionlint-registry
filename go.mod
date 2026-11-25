@@ -8,7 +8,7 @@ require (
 	github.com/cli/go-gh/v2 v2.17.0
 	github.com/go-quickjs/go-quickjs v0.44.0
 	github.com/google/go-github/v93 v93.0.0
-	github.com/rogpeppe/go-internal v1.15.0
+	github.com/rogpeppe/go-internal v1.16.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
