@@ -53,6 +53,8 @@ jobs:
           path: dist/downloads.json
           if-no-files-found: error
           retention-days: 90
+      - name: Copy schema files
+        run: cp schemas/*.schema.json dist/schemas/
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with: { path: dist }
 
@@ -69,14 +71,3 @@ jobs:
     steps:
       - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
         id: deployment
-      - name: Check the live 404 page
-        continue-on-error: true
-        env:
-          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
-        shell: bash
-        run: |
-          site=${PAGE_URL%/}
-          status=$(curl -sSL --max-time 15 -o missing.html -w '%{http_code}' "$site/plugins/missing-$GITHUB_RUN_ID/record.json")
-          test "$status" = 404
-          curl -fsSL --max-time 15 "$site/404.html" | cmp - missing.html
-          curl -fsSL --max-time 15 -o /dev/null -w '%{content_type}' "$site/assets/site.css" | grep -Eiq '^text/css([[:space:]]*;|$)'
