@@ -40,8 +40,9 @@ test('empty export builds useful static fallback pages', async () => {
 	expect(home).not.toContain('class="plugin-card"');
 });
 
-test('separate output keeps publication records reachable and byte-for-byte intact', async () => {
+test('separate output preserves legacy records and tracks the files it copies', async () => {
 	const directory = await createExport([fixture('Plugin')]);
+	await unlink(join(directory, 'downloads.json'));
 	const output = join(directory, 'website');
 	await mkdir(output);
 	await chmod(output, 0o755);
@@ -52,6 +53,12 @@ test('separate output keeps publication records reachable and byte-for-byte inta
 		await readFile(join(directory, 'index.json'), 'utf8'),
 	);
 	expect(await readFile(join(output, record), 'utf8')).toBe(await readFile(join(directory, record), 'utf8'));
+	expect(await Bun.file(join(output, '.registry-export-files.json')).json()).toEqual([
+		'index.json',
+		`plugins/${'1'.padStart(64, '0')}/index.json`,
+		record,
+		'statuses.json',
+	]);
 });
 
 test('removing a plugin requires a fresh snapshot and keeps the previous site intact', async () => {
@@ -103,6 +110,7 @@ test('only regular files owned by the export can be published', async () => {
 	await buildSite(source, output);
 	expect(await Bun.file(join(output, 'notes.json')).exists()).toBe(false);
 	expect(await Bun.file(join(output, 'index.json')).exists()).toBe(true);
+	expect(await Bun.file(join(output, '.registry-export-files.json')).json()).toEqual(paths.toSorted());
 
 	const empty = await createExport([]);
 	await writeFile(marker, JSON.stringify([...paths, '../index.json']));

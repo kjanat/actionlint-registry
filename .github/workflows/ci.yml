@@ -43,8 +43,10 @@ jobs:
           bun run --cwd site typecheck
           bun test --cwd site
           bun run --cwd site test:browser
-      - name: Build catalogue from exported registry JSON
+      - name: Build and refresh the catalogue from exported registry JSON
         run: |
+          go run ./cmd/registry export --store registry/plugins --output "$RUNNER_TEMP/registry-export"
+          bun site/cli.ts --input "$RUNNER_TEMP/registry-export" --output dist
           go run ./cmd/registry export --store registry/plugins --output dist
           bun site/cli.ts --input dist --output dist
 

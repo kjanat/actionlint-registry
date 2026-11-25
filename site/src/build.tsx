@@ -40,6 +40,7 @@ export async function buildSite(input: string, output: string): Promise<number> 
 				await mkdir(dirname(target), { recursive: true });
 				await copyFile(join(source, path), target);
 			}
+			await writeFile(join(staging, exportManifest), JSON.stringify([...exportPaths].sort()));
 		}
 		const data = await loadCatalogue(inPlace ? source : staging);
 		const linked = new Set(data.plugins.flatMap(plugin => [
