@@ -2,7 +2,6 @@ import { Schema } from 'effect';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { catalogueSchema, downloadsSchema, entrySchema, manifestSchema, statusSchema } from '#schema.ts';
-import type { PluginSchemaSource } from '#plugin-config-schemas.ts';
 import type { DownloadSnapshot, Entry, Metric, Plugin, Release, ReleaseStatus, SiteData } from '#schema.ts';
 
 function submissionDigest(entry: Entry): string {
@@ -62,9 +61,7 @@ function statusFor(entry: Entry, name: string, statuses: readonly ReleaseStatus[
 		);
 }
 
-export async function loadCatalogue(
-	directory: string,
-): Promise<SiteData & { configurationSources: PluginSchemaSource[] }> {
+export async function loadCatalogue(directory: string): Promise<SiteData> {
 	const catalogue = await readJSON(join(directory, 'index.json'), catalogueSchema);
 	const statuses = await readJSON(join(directory, catalogue.statuses ?? 'statuses.json'), statusSchema);
 	let downloads: DownloadSnapshot | null = null;
@@ -73,7 +70,7 @@ export async function loadCatalogue(
 	} catch (error) {
 		if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
 	}
-	const items = await Promise.all(catalogue.plugins.map(async item => {
+	const plugins = await Promise.all(catalogue.plugins.map(async item => {
 		const manifest = await readJSON(join(directory, item.manifest), manifestSchema);
 		const repository = `${manifest.plugin.provider}.com/${manifest.plugin.repository}`;
 		let selector = repository;
@@ -137,7 +134,7 @@ export async function loadCatalogue(
 		if (!newest) throw new Error(`No releases for ${item.name}`);
 		const declared = newest.entry.artifact?.metadata ?? newest.entry.validation?.metadata;
 		const releases = entries.map(entry => entry.release);
-		const plugin: Plugin = {
+		return {
 			name: declared?.name || reference,
 			description: declared?.description ?? '',
 			license: declared?.license ?? '',
@@ -149,15 +146,10 @@ export async function loadCatalogue(
 			updatedAt: newest.release.publishedAt,
 			downloads: totalMetric(releases),
 			releases,
-		};
-		return {
-			plugin,
-			configuration: { name: item.name, description: plugin.description, versions: entries },
-		};
+		} satisfies Plugin;
 	}));
 	return {
-		plugins: items.map(item => item.plugin),
-		configurationSources: items.map(item => item.configuration),
+		plugins,
 		observedAt: downloads?.observed_at ?? null,
 	};
 }

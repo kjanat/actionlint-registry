@@ -21,10 +21,6 @@ const metadata = Schema.Struct({
 	name: Schema.String.pipe(Schema.optionalKey),
 	description: Schema.String.pipe(Schema.optionalKey),
 	license: Schema.String.pipe(Schema.optionalKey),
-	engine: Schema.optionalKey(Schema.Unknown),
-	config_schema: Schema.optionalKey(Schema.Unknown),
-	rules: Schema.optionalKey(Schema.Unknown),
-	descriptor: Schema.optionalKey(Schema.Unknown),
 });
 
 function validOCIReference(value: string): boolean {
@@ -165,7 +161,6 @@ export const searchIndexSchema = Schema.Array(summarySchema).pipe(Schema.mutable
 export type PluginSummary = typeof summarySchema.Type;
 export type Metric = typeof metricSchema.Type;
 export type Entry = typeof entrySchema.Type;
-export type PluginMetadata = typeof metadata.Type;
 export type ReleaseStatus = typeof statusSchema['Type']['releases'][number];
 export type DownloadSnapshot = typeof downloadsSchema.Type;
 export type ReleaseState = typeof stateSchema.Type;

@@ -213,6 +213,16 @@ type Entry struct {
 	Validation        *LegacyValidation     `json:"validation,omitempty"`
 }
 
+func (e Entry) metadata() json.RawMessage {
+	if e.Artifact != nil {
+		return e.Artifact.Metadata
+	}
+	if e.Validation != nil {
+		return e.Validation.Metadata
+	}
+	return nil
+}
+
 func (e Entry) PluginID() string {
 	if e.Artifact != nil {
 		return e.Artifact.PluginID

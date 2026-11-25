@@ -53,8 +53,6 @@ jobs:
           path: dist/downloads.json
           if-no-files-found: error
           retention-days: 90
-      - name: Copy schema files
-        run: cp schemas/*.schema.json dist/schemas/
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with: { path: dist }
 
@@ -71,3 +69,26 @@ jobs:
     steps:
       - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
         id: deployment
+      - name: Check deployed 404 routing and assets
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+
+          const root = process.env.PAGE_URL.replace(/\/?$/, '/');
+          const missing = new URL(`plugins/pages-smoke/${process.env.GITHUB_RUN_ID}/missing.json`, root);
+          const page = await fetch(missing);
+          assert.equal(page.status, 404, page.url);
+          const html = await page.text();
+          assert.match(html, /<h1>Page not found<\/h1>/);
+          const stylesheet = html.match(/<link rel="stylesheet" href="([^"]+)"/)?.[1];
+          const browse = html.match(/<a href="([^"]+)">Browse plugins<\/a>/)?.[1];
+          assert.ok(stylesheet && browse, 'The 404 page must link to its stylesheet and plugin directory');
+          const css = await fetch(new URL(stylesheet, page.url));
+          assert.equal(css.status, 200, css.url);
+          assert.match(css.headers.get('content-type') ?? '', /^text\/css/i);
+          const home = await fetch(new URL(browse, page.url));
+          assert.equal(home.status, 200, home.url);
+          assert.match(await home.text(), /<h1[^>]*>Plugins for actionlint<\/h1>/);
+          JS

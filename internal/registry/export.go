@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -100,8 +101,17 @@ func Export(index Index, directory string, statuses []ReleaseStatus, aliases *Al
 }
 
 func export(index Index, directory string, statuses []ReleaseStatus, downloads *DownloadSnapshot, aliases *Aliases, evidence ...compatibility.Evidence) error {
+	return replaceExport(directory, func(staging string) error {
+		return writeExport(index, staging, statuses, downloads, aliases, evidence...)
+	})
+}
+
+func writeExport(index Index, directory string, statuses []ReleaseStatus, downloads *DownloadSnapshot, aliases *Aliases, evidence ...compatibility.Evidence) error {
 	schema, err := schemas.Bundle()
 	if err != nil {
+		return err
+	}
+	if err := schemas.CopyResources(filepath.Join(directory, "schemas")); err != nil {
 		return err
 	}
 	if aliases != nil {
@@ -175,7 +185,10 @@ func export(index Index, directory string, statuses []ReleaseStatus, downloads *
 			return err
 		}
 	}
-	return WriteJSON(filepath.Join(directory, "schemas", "registry.schema.json"), schema)
+	if err := WriteJSON(filepath.Join(directory, "schemas", "registry.schema.json"), schema); err != nil {
+		return err
+	}
+	return exportConfigSchemas(index, directory, statuses, os.Stderr)
 }
 
 func writeCatalog(directory string, catalog Catalog) error {

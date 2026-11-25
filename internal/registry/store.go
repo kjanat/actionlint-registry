@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"registry.actionlint.kjanat.dev/internal/artifact"
 )
 
 type Plugin struct {
@@ -194,8 +196,16 @@ func (s Store) merge(candidate Index, beforeWrite func(current, merged Index, wr
 	existing := current
 	existing.Entries = slices.Clip(current.Entries)
 	for _, entry := range candidate.Entries {
+		before := len(existing.Entries)
 		if err = existing.Add(entry); err != nil {
 			return err
+		}
+		// Apply current admission rules to new candidates. Immutable records
+		// already in the store remain readable and can be merged idempotently.
+		if len(existing.Entries) != before {
+			if _, err = artifact.ConfigSettings(entry.metadata()); err != nil {
+				return fmt.Errorf("%s@%s: plugin settings: %w", entry.Name(), entry.Submission.Tag, err)
+			}
 		}
 		data, err := json.MarshalIndent(entry, "", "  ")
 		if err != nil {

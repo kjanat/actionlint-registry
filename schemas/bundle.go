@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -47,4 +48,9 @@ func Bundle() (map[string]any, error) {
 		"$defs":   definitions,
 		"title":   "actionlint plugin registry",
 	}, nil
+}
+
+// CopyResources publishes the standalone resources at their canonical paths.
+func CopyResources(directory string) error {
+	return os.CopyFS(directory, files)
 }
