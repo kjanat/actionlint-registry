@@ -1,0 +1,38 @@
+{
+  "report": {
+    "schema_version": 3,
+    "artifact_sha256": "c33638bb1fac6167e4dcd3a5fb7f59fcaa639c93d2287c4dda07f2beea3522b4",
+    "host": {
+      "name": "actionlint",
+      "revision": "3747a77b7ff9"
+    },
+    "policy": "actionlint-smoke/1",
+    "outcome": "unsupported",
+    "checks": [],
+    "runner_as_of": "2026-11-25",
+    "detail": "contract is not supported by this checker: unprovided interface: plugin exports kjanat:actionlint/analyzer@0.1.0; this host supports kjanat:actionlint/analyzer@0.2.0",
+    "imports": [
+      "kjanat:actionlint/host@0.1.0",
+      "wasi:io/poll@0.2.12",
+      "wasi:clocks/monotonic-clock@0.2.12",
+      "wasi:io/error@0.2.12",
+      "wasi:io/streams@0.2.12",
+      "wasi:cli/stdout@0.2.12",
+      "wasi:cli/stderr@0.2.12",
+      "wasi:cli/stdin@0.2.12",
+      "wasi:cli/environment@0.2.12",
+      "wasi:cli/exit@0.2.12",
+      "wasi:cli/terminal-input@0.2.12",
+      "wasi:cli/terminal-output@0.2.12",
+      "wasi:cli/terminal-stdin@0.2.12",
+      "wasi:cli/terminal-stdout@0.2.12",
+      "wasi:cli/terminal-stderr@0.2.12",
+      "wasi:random/insecure-seed@0.2.12"
+    ],
+    "exports": [
+      "kjanat:actionlint/analyzer@0.1.0"
+    ]
+  },
+  "checker_sha256": "07af93edd6058c288526bf95e0ea5b8bbd91f44ca512780dbaf9a78fc4742308",
+  "observed_at": "2026-11-25T04:33:06.148919744Z"
+}
