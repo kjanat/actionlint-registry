@@ -93,7 +93,8 @@ test('an in-place collision preserves existing files and removes newly staged pa
 
 test('only regular files owned by the export can be published', async () => {
 	const source = await createExport([fixture('Plugin')]);
-	const paths = (await readdir(source, { recursive: true })).filter(path => path.endsWith('.json')).map(path => path.replaceAll('\\', '/'));
+	const paths = (await readdir(source, { recursive: true }))
+		.filter(path => path.endsWith('.json')).map(path => path.replaceAll('\\', '/'));
 	const marker = join(source, '.registry-export-files.json');
 	await writeFile(marker, JSON.stringify(paths));
 	await writeFile(join(source, 'notes.json'), '{}');
@@ -109,5 +110,10 @@ test('only regular files owned by the export can be published', async () => {
 	await unlink(join(source, 'downloads.json'));
 	await symlink(join(source, 'notes.json'), join(source, 'downloads.json'));
 	await writeFile(marker, JSON.stringify(paths));
+	await expect(buildSite(source, join(empty, 'website'))).rejects.toThrow('missing or non-regular files');
+	await unlink(join(source, 'downloads.json'));
+	await writeFile(join(source, 'downloads.json'), '{}');
+	await symlink(empty, join(source, 'schemas'), 'dir');
+	await writeFile(marker, JSON.stringify([...paths, 'schemas/index.json']));
 	await expect(buildSite(source, join(empty, 'website'))).rejects.toThrow('missing or non-regular files');
 });

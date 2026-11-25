@@ -6,11 +6,13 @@ import (
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"fmt"
+	"net/netip"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/dlclark/regexp2/v2"
+	"github.com/go-quickjs/go-quickjs/jsregexp"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -182,12 +184,37 @@ func (d *settingDocument) collect(value any, ptr jsontext.Pointer, base *url.URL
 	return nil
 }
 
+// RFC 3986 sections 2 and 3. net/url.Parse resolves URI references, but also
+// accepts characters such as | and { and silently escapes them on serialization.
+const (
+	uriChar   = `(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f]{2})` // unreserved / sub-delims / pct-encoded
+	pathChar  = `(?:` + uriChar + `|[:@])`
+	queryChar = `(?:` + pathChar + `|[/?])`
+	segments  = `(?:/` + pathChar + `*)*`
+	ipFuture  = `[vV][A-Fa-f0-9]+\.[A-Za-z0-9._~!$&'()*+,;=:-]+`
+	authority = `(?:(?:` + uriChar + `|:)*@)?(?:` + uriChar + `*|\[(?:[A-Fa-f0-9:.]+|` + ipFuture + `)\])(?::[0-9]*)?`
+)
+
+var uriReference = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9+.-]*:)?(?://` + authority + segments + `|/?(?:` + pathChar + `+` + segments + `)?)(?:\?` + queryChar + `*)?(?:#` + queryChar + `*)?$`)
+
 func schemaURI(value any) (*url.URL, error) {
 	s, ok := value.(string)
-	if !ok || strings.ContainsAny(s, " \t\r\n") {
+	if !ok || !uriReference.MatchString(s) {
 		return nil, fmt.Errorf("expected a URI reference")
 	}
-	return url.Parse(s)
+	u, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(u.Host, "[") {
+		host := u.Hostname()
+		if !strings.HasPrefix(strings.ToLower(host), "v") {
+			if ip, err := netip.ParseAddr(host); err != nil || !ip.Is6() {
+				return nil, fmt.Errorf("invalid IP literal in URI reference")
+			}
+		}
+	}
+	return u, nil
 }
 
 // Resolve every reference against its original resource. On export, translate the
@@ -234,7 +261,7 @@ func publishedResource(root *url.URL, ptr jsontext.Pointer) url.URL {
 }
 
 // JSON Schema patterns use ECMAScript syntax, including lookahead and backreferences.
-type schemaPattern struct{ *regexp2.Regexp }
+type schemaPattern struct{ *jsregexp.Regexp }
 
 func (p schemaPattern) MatchString(s string) bool {
 	matched, err := p.Regexp.MatchString(s)
@@ -242,7 +269,7 @@ func (p schemaPattern) MatchString(s string) bool {
 }
 
 func compileSchemaPattern(pattern string) (jsonschema.Regexp, error) {
-	re, err := regexp2.Compile(pattern, regexp2.ECMAScript|regexp2.Unicode)
+	re, err := jsregexp.Compile(pattern, "u")
 	if err != nil {
 		return nil, err
 	}

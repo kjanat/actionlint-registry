@@ -13,6 +13,12 @@ import (
 
 func TestSettingsAdmission(t *testing.T) {
 	for name, fields := range map[string]string{
+		".NET atomic group":   `"config_schema":{"pattern":"(?>abc)"}`,
+		".NET comment":        `"config_schema":{"pattern":"(?#comment)abc"}`,
+		".NET inline flag":    `"config_schema":{"pattern":"(?i)foo"}`,
+		"unescaped path":      `"config_schema":{"$id":"a|none"}`,
+		"unescaped brace":     `"config_schema":{"$id":"a{}"}`,
+		"unescaped ref":       `"config_schema":{"$defs":{"child|":{"type":"string"}},"$ref":"#/$defs/child|"}`,
 		"Go-only pattern":     `"config_schema":{"pattern":"(?P<bad>abc)"}`,
 		"wrong keyword type":  `"config_schema":{"type":123}`,
 		"invalid nested type": `"config_schema":{"$defs":{"unused":{"type":"typo"}}}`,

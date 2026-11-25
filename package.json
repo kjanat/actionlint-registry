@@ -34,7 +34,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "yaml-schema-lint": "2.1.0"
   },
   "packageManager": "bun@1.4.5"
 }

@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 import { constants } from 'node:fs';
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join, posix, relative, resolve, sep } from 'node:path';
+import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { render } from 'preact-render-to-string';
 import { Schema } from 'effect';
@@ -14,7 +14,9 @@ import type { SiteData } from '#schema.ts';
 const siteManifest = '.registry-site-files.json';
 const exportManifest = '.registry-export-files.json';
 const publicJSON = /^(?:(?:index|statuses|downloads)\.json|(?:plugins|compatibility|schemas)\/(?:[a-z0-9_-][a-z0-9._-]*\/)*[a-z0-9_-][a-z0-9._-]*\.json)$/i;
-const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String.check(Schema.isPattern(publicJSON)))));
+const decodeManifest = Schema.decodeUnknownSync(
+	Schema.fromJsonString(Schema.Array(Schema.String.check(Schema.isPattern(publicJSON)))),
+);
 
 export async function buildSite(input: string, output: string): Promise<number> {
 	const source = resolve(input);
@@ -116,14 +118,23 @@ async function publicExportFiles(source: string, marked: boolean, inPlace: boole
 	}
 
 	const files = new Set<string>();
-	for (const entry of await readdir(source, { recursive: true, withFileTypes: true })) {
-		const path = relative(source, join(entry.parentPath, entry.name)).split(sep).join('/');
-		if (path === exportManifest) continue;
-		if (entry.isFile() && (owned?.has(path) ?? publicJSON.test(path))) files.add(path);
-		else if (owned && inPlace && !(entry.isDirectory() && directories.has(path))) {
-			throw new Error(`Unmanaged entry in site input: ${path}`);
+	async function walk(parent: string): Promise<void> {
+		for (const entry of await readdir(join(source, parent), { withFileTypes: true })) {
+			const path = posix.join(parent, entry.name);
+			if (path === exportManifest) continue;
+			const publicDirectory = owned
+				? directories.has(path)
+				: parent !== '' || ['plugins', 'schemas', 'compatibility'].includes(path);
+			if (entry.isDirectory() && publicDirectory) {
+				await walk(path);
+			} else if (entry.isFile() && (owned?.has(path) ?? publicJSON.test(path))) {
+				files.add(path);
+			} else if (owned && inPlace) {
+				throw new Error(`Unmanaged entry in site input: ${path}`);
+			}
 		}
 	}
+	await walk('');
 	if (owned && files.size !== owned.size) throw new Error('Export manifest lists missing or non-regular files');
 	return files;
 }

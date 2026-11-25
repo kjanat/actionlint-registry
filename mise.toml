@@ -5,7 +5,6 @@ node          = "26.13.1"
 bun           = "1.4.5"
 golangci-lint = "2.15.0"
 tombi         = "1.11.3"
-"npm:yaml-schema-lint" = "2.1.0"
 kprint        = "0.64.1"
 runner-run    = "0.28.0"
 rshellcheck   = { version = "1.2.0", rename_exe = "shellcheck" }
