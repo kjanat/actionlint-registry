@@ -278,6 +278,34 @@ The root [`action.yml`](../action.yml) remains the smaller submission-only entry
 point for publishers with an existing release workflow. It returns the submission
 ID and current state; `pending` and `validating` require further observation.
 
+## GitLab.com
+
+Publish a tagged release in a public GitLab.com project. Upload the artifact to
+the same project's `actionlint-plugin` generic package using the exact tag as
+the package version. Pass the uploaded file's SHA-256 to the submission job as
+`PLUGIN_SHA256`.
+
+Run the following job in the tag pipeline with Bun installed and a reviewed
+revision of this repository checked out at `registry-client/`.
+
+```yaml
+register:
+  rules:
+    - if: $CI_COMMIT_TAG
+  id_tokens:
+    REGISTRY_ID_TOKEN:
+      aud: https://registry.actionlint.kjanat.dev
+  script:
+    - bun install --cwd registry-client --frozen-lockfile --filter @kjanat-actionlint/registry-tools
+    - bun registry-client/scripts/cli.ts submit
+  variables:
+    PLUGIN_PROVIDER: gitlab
+    PLUGIN_REPOSITORY: $CI_PROJECT_PATH
+    PLUGIN_TAG: $CI_COMMIT_TAG
+    PLUGIN_ASSET: plugin.wasm
+    PLUGIN_KIND: component
+```
+
 ## Resume and recovery
 
 Observe a submission without uploading or submitting again:
