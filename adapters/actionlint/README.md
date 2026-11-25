@@ -23,6 +23,11 @@ the accepted artifact's checksum, isolate inherited credentials, and store the
 report.
 The process boundary does not provide an operating-system sandbox.
 
+The [Check accepted plugins workflow](../../.github/workflows/compatibility.yml)
+rechecks published releases when this checker changes. Each release page links the
+observed outcome to its report, including the host revision and checker digest.
+If a download or checker run is interrupted, the scheduled workflow retries it.
+
 The checker uses the actionlint v2 revision required in `go.mod` and reports it
 from the build. Its tests load runtime fixtures from that host module.
 It supports core ABI 1. The checker runs the host's own admission decision,

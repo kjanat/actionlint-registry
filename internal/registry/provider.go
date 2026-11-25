@@ -134,17 +134,25 @@ func (g *GitLab) DownloadRelease(ctx context.Context, s Submission, r Release, p
 	if r.DownloadURL != releaseURL(s, r.Entry.RepositoryID) {
 		return errors.New("invalid GitLab package URL")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.DownloadURL, nil)
+	return downloadAsset(ctx, g.client, r.DownloadURL, path, s.Digest(), -1)
+}
+
+func downloadAsset(ctx context.Context, client *http.Client, address, path, digest string, expectedSize int64) (err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := g.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		// Redirects can contain signed CDN URLs.
+		if transport, ok := errors.AsType[*url.Error](err); ok {
+			err = transport.Err
+		}
+		return fmt.Errorf("release asset download: %w", err)
 	}
 	defer func() { err = errors.Join(err, resp.Body.Close()) }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GitLab package HTTP %d", resp.StatusCode)
+		return fmt.Errorf("release asset HTTP %d", resp.StatusCode)
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -155,8 +163,8 @@ func (g *GitLab) DownloadRelease(ctx context.Context, s Submission, r Release, p
 	if err = errors.Join(copyErr, f.Close()); err != nil {
 		return err
 	}
-	if n == 0 || n > MaxArtifactBytes || hex.EncodeToString(hash.Sum(nil)) != s.Digest() {
-		return errors.New("GitLab package size or SHA256 mismatch")
+	if n == 0 || n > MaxArtifactBytes || (expectedSize >= 0 && n != expectedSize) || hex.EncodeToString(hash.Sum(nil)) != digest {
+		return errors.New("release asset size or SHA256 mismatch")
 	}
 	return nil
 }
