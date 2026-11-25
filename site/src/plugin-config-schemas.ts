@@ -1,19 +1,23 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { Schema } from 'effect';
+import { Option, Result, Schema } from 'effect';
 import type { Entry, PluginMetadata, Release } from '#schema.ts';
 
 const registry = 'https://plugins.actionlint.kjanat.dev/';
 const draft = 'https://json-schema.org/draft/2020-12/schema';
 const catalogPath = 'schemas/plugin-config.catalog.json';
 
-const schemaObject = Schema.Record(Schema.String, Schema.Unknown);
+const sameSchema = Schema.toEquivalence(Schema.JsonObject);
+const decodeSchema = Schema.decodeUnknownOption(Schema.JsonObject);
+const decodeSchemaId = Schema.decodeUnknownOption(Schema.String.check(Schema.isPattern(/^\S+$/u)));
 const engine = Schema.Struct({ name: Schema.NonEmptyString });
 const rule = Schema.Struct({
 	category: Schema.NonEmptyString,
 	name: Schema.NonEmptyString,
-	options_schema: schemaObject,
+	options_schema: Schema.JsonObject,
 });
+const decodeEngine = Schema.decodeUnknownOption(engine);
+const decodeRule = Schema.decodeUnknownOption(rule);
 
 export interface PluginSchemaSource {
 	name: string;
@@ -22,17 +26,17 @@ export interface PluginSchemaSource {
 }
 
 function settings(metadata: PluginMetadata) {
-	const result = new Map<string, { path: string[]; schema: Record<string, unknown>; file: boolean }>();
-	const parsedEngine = Schema.decodeUnknownOption(engine)(metadata.engine);
-	const config = Schema.decodeUnknownOption(schemaObject)(metadata.config_schema);
-	if (parsedEngine._tag === 'Some' && config._tag === 'Some') {
+	const result = new Map<string, { path: string[]; schema: Schema.JsonObject; file: boolean }>();
+	const parsedEngine = decodeEngine(metadata.engine);
+	const config = decodeSchema(metadata.config_schema);
+	if (Option.isSome(parsedEngine) && Option.isSome(config)) {
 		const path = ['tools', parsedEngine.value.name, 'config'];
 		result.set(JSON.stringify(path), { path, schema: config.value, file: true });
 	}
 	const rules = Array.isArray(metadata.rules) ? metadata.rules : [];
 	for (const candidate of [...rules, metadata.descriptor]) {
-		const parsed = Schema.decodeUnknownOption(rule)(candidate);
-		if (parsed._tag === 'None') continue;
+		const parsed = decodeRule(candidate);
+		if (Option.isNone(parsed)) continue;
 		const { category, name, options_schema } = parsed.value;
 		const path = ['lint', 'rules', category, name, 'options'];
 		result.set(JSON.stringify(path), { path, schema: options_schema, file: false });
@@ -47,22 +51,32 @@ interface ConfigProperty {
 }
 
 function versionSchema(url: URL, metadata: PluginMetadata) {
-	const resources = new Map<string, { id: string; schema: Record<string, unknown> }>();
-	const resourceIds = new Set<string>();
+	const resources = new Map<string, string>();
+	const resourceIds = new Map<string, Schema.JsonObject>();
 	const root: Record<string, ConfigProperty> = Object.create(null);
 	for (const setting of settings(metadata)) {
 		const key = JSON.stringify(setting.schema);
-		let resource = resources.get(key);
-		if (!resource) {
+		let resourceId = resources.get(key);
+		if (!resourceId) {
 			const declaredId = setting.schema.$id;
+			const parsedId = decodeSchemaId(declaredId);
 			// A distinct resource base keeps local references relative to the plugin's schema.
-			const id = typeof declaredId === 'string'
-				? new URL(declaredId, url).href
-				: new URL(`?settings=${resources.size + 1}`, url).href;
-			if (id === url.href || resourceIds.has(id)) throw new Error(`Duplicate schema resource ${id} in ${url}`);
-			resource = { id, schema: { ...setting.schema, $id: id } };
-			resources.set(key, resource);
-			resourceIds.add(id);
+			const resolved = declaredId === undefined
+				? new URL(`?settings=${resources.size + 1}`, url)
+				: Option.isSome(parsedId)
+				? URL.parse(parsedId.value, url)
+				: null;
+			if (!resolved || resolved.hash) return Result.fail('invalid schema $id');
+			resolved.hash = '';
+			const id = resolved.href;
+			const schema = { ...setting.schema, $id: id };
+			const previous = resourceIds.get(id);
+			if (id === url.href || (previous && !sameSchema(previous, schema))) {
+				return Result.fail('conflicting schema $id');
+			}
+			resourceId = id;
+			resources.set(key, id);
+			resourceIds.set(id, schema);
 		}
 
 		let properties = root;
@@ -73,20 +87,20 @@ function versionSchema(url: URL, metadata: PluginMetadata) {
 		const leaf = setting.file ? 'config' : 'options';
 		properties[leaf] = {
 			anyOf: [
-				{ $ref: resource.id },
+				{ $ref: resourceId },
 				{ type: 'null' },
 				...(setting.file ? [{ type: 'string' } as const] : []),
 			],
 		};
 	}
-	if (resources.size === 0) return;
-	return {
+	if (resources.size === 0) return Result.succeed(undefined);
+	return Result.succeed({
 		$schema: draft,
 		$id: url.href,
 		type: 'object',
 		properties: { ...root, overrides: { items: { properties: root } } },
-		$defs: Object.fromEntries(Array.from(resources.values(), ({ schema }, index) => [`settings-${index + 1}`, schema])),
-	};
+		$defs: Object.fromEntries(Array.from(resourceIds.values(), (schema, index) => [`settings-${index + 1}`, schema])),
+	});
 }
 
 export async function writePluginConfigSchemas(output: string, plugins: readonly PluginSchemaSource[]): Promise<void> {
@@ -104,7 +118,12 @@ export async function writePluginConfigSchemas(output: string, plugins: readonly
 			if (!metadata) continue;
 			const path = release.record.replace(/\.json$/u, '.config.schema.json');
 			const url = new URL(path, registry);
-			const schema = versionSchema(url, metadata);
+			const result = versionSchema(url, metadata);
+			if (Result.isFailure(result)) {
+				console.warn(`Skipping configuration schema for ${plugin.name}@${release.version}: ${result.failure}`);
+				continue;
+			}
+			const schema = result.success;
 			if (!schema) continue;
 			await write(path, schema);
 			versions.set(release.version, url.href);

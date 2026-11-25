@@ -25,8 +25,8 @@ function releaseSource(entry: Entry): Release['source'] {
 	return { type: 'oci', reference: submission.artifact.reference };
 }
 
-async function readJSON(path: string): Promise<unknown> {
-	return JSON.parse(await readFile(path, 'utf8'));
+async function readJSON<S extends Schema.ConstraintDecoder<unknown>>(path: string, schema: S): Promise<S['Type']> {
+	return Schema.decodeUnknownSync(Schema.fromJsonString(schema))(await readFile(path, 'utf8'));
 }
 
 function releaseMetric(entry: Entry, downloads: DownloadSnapshot | null): Metric {
@@ -65,18 +65,16 @@ function statusFor(entry: Entry, name: string, statuses: readonly ReleaseStatus[
 export async function loadCatalogue(
 	directory: string,
 ): Promise<SiteData & { configurationSources: PluginSchemaSource[] }> {
-	const catalogue = Schema.decodeUnknownSync(catalogueSchema)(await readJSON(join(directory, 'index.json')));
-	const statuses = Schema.decodeUnknownSync(statusSchema)(
-		await readJSON(join(directory, catalogue.statuses ?? 'statuses.json')),
-	);
+	const catalogue = await readJSON(join(directory, 'index.json'), catalogueSchema);
+	const statuses = await readJSON(join(directory, catalogue.statuses ?? 'statuses.json'), statusSchema);
 	let downloads: DownloadSnapshot | null = null;
 	try {
-		downloads = Schema.decodeUnknownSync(downloadsSchema)(await readJSON(join(directory, 'downloads.json')));
+		downloads = await readJSON(join(directory, 'downloads.json'), downloadsSchema);
 	} catch (error) {
 		if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
 	}
 	const items = await Promise.all(catalogue.plugins.map(async item => {
-		const manifest = Schema.decodeUnknownSync(manifestSchema)(await readJSON(join(directory, item.manifest)));
+		const manifest = await readJSON(join(directory, item.manifest), manifestSchema);
 		const repository = `${manifest.plugin.provider}.com/${manifest.plugin.repository}`;
 		let selector = repository;
 		if (manifest.plugin.schema_version === 2) {
@@ -101,7 +99,7 @@ export async function loadCatalogue(
 		const reference = item.aliases.toSorted()[0] ?? item.name;
 		const entries = await Promise.all(manifest.versions.map(async version => {
 			const record = join(dirname(item.manifest), version.record).replaceAll('\\', '/');
-			const entry = Schema.decodeUnknownSync(entrySchema)(await readJSON(join(directory, record)));
+			const entry = await readJSON(join(directory, record), entrySchema);
 			if (
 				entry.submission.tag !== version.version
 				|| `${entry.submission.provider}.com/${entry.submission.repository}` !== repository
