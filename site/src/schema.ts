@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 
 const digest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 const integer = Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }));
@@ -21,6 +21,11 @@ const metadata = Schema.Struct({
 	name: Schema.String.pipe(Schema.optionalKey),
 	description: Schema.String.pipe(Schema.optionalKey),
 	license: Schema.String.pipe(Schema.optionalKey),
+});
+
+const legacyMetadata = Schema.Struct({
+	...metadata.fields,
+	description: Schema.String.pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(''))), Schema.optionalKey),
 });
 
 function validOCIReference(value: string): boolean {
@@ -55,6 +60,9 @@ export const manifestSchema = Schema.Struct({
 		Schema.Struct({
 			version: Schema.String,
 			record: Schema.String.check(Schema.isPattern(/^versions\/[a-f0-9]{64}\.json$/)),
+			compatibility: Schema.Array(Schema.Struct({
+				report: Schema.String.check(Schema.isPattern(/^\.\.\/\.\.\/compatibility\/[a-f0-9]{64}\/[a-f0-9]{64}\.json$/)),
+			})).pipe(Schema.optionalKey),
 			imports: interfaceNames.pipe(Schema.optionalKey),
 			exports: interfaceNames.pipe(Schema.optionalKey),
 		}).check(Schema.makeFilter(version => (version.imports === undefined) === (version.exports === undefined), {
@@ -102,7 +110,7 @@ export const entrySchema = Schema.Struct({
 	),
 	published_at: timestamp,
 	artifact: Schema.Struct({ metadata, plugin_id: Schema.String.pipe(Schema.optionalKey) }).pipe(Schema.optionalKey),
-	validation: Schema.Struct({ metadata, plugin_id: Schema.String.pipe(Schema.optionalKey) }).pipe(Schema.optionalKey),
+	validation: Schema.Struct({ metadata: legacyMetadata, plugin_id: Schema.String.pipe(Schema.optionalKey) }).pipe(Schema.optionalKey),
 }).check(
 	Schema.makeFilter(entry => {
 		const { submission } = entry;

@@ -200,8 +200,6 @@ func (s Store) merge(candidate Index, beforeWrite func(current, merged Index, wr
 		if err = existing.Add(entry); err != nil {
 			return err
 		}
-		// Apply current admission rules to new candidates. Immutable records
-		// already in the store remain readable and can be merged idempotently.
 		if len(existing.Entries) != before {
 			if _, err = artifact.ConfigSettings(entry.metadata()); err != nil {
 				return fmt.Errorf("%s@%s: plugin settings: %w", entry.Name(), entry.Submission.Tag, err)

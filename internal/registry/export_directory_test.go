@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"errors"
 	"io/fs"
 	"os"
@@ -9,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestExportReplacesOnlyOwnedSnapshot(t *testing.T) {
+func TestExportRefusesToDeleteUnlistedFiles(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "export")
 	entry := acceptedFixture(t)
 	if err := Export(Index{SchemaVersion: 1, Entries: []Entry{entry}}, output, nil, nil); err != nil {
@@ -21,7 +22,7 @@ func TestExportReplacesOnlyOwnedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := Export(EmptyIndex(), output, nil, nil); err == nil {
-		t.Fatal("replaced output containing an unmanaged file")
+		t.Fatal("export deleted a directory containing notes.txt")
 	}
 	if contents, err := os.ReadFile(local); err != nil || string(contents) != "keep" {
 		t.Fatalf("lost local file: %q, %v", contents, err)
@@ -45,9 +46,14 @@ func TestExportReplacesOnlyOwnedSnapshot(t *testing.T) {
 	}
 }
 
-func TestFailedExportPreservesPublishedSnapshot(t *testing.T) {
+func TestFailedExportLeavesIndexUnchanged(t *testing.T) {
 	output := t.TempDir()
 	if err := Export(EmptyIndex(), output, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(output, "index.json")
+	before, err := os.ReadFile(index)
+	if err != nil {
 		t.Fatal(err)
 	}
 	want := errors.New("invalid input")
@@ -59,12 +65,16 @@ func TestFailedExportPreservesPublishedSnapshot(t *testing.T) {
 	}); !errors.Is(err, want) {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(filepath.Join(output, "index.json")); err != nil || string(data) == "partial" {
-		t.Fatalf("failed build changed the published index: %s, %v", data, err)
+	after, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("index.json changed after the build failed")
 	}
 }
 
-func TestExportPreservesDestinationPermissions(t *testing.T) {
+func TestExportKeepsDirectoryMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("directory mode bits are POSIX permissions")
 	}

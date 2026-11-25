@@ -2,11 +2,28 @@ import { Schema } from 'effect';
 import { describe, expect, test } from 'bun:test';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { buildSite } from '#build.tsx';
 import { loadCatalogue } from '#catalogue.ts';
 import { downloadsSchema } from '#schema.ts';
 import { createExport, fixture } from '#test/fixtures.ts';
 
 describe('public registry JSON projection', () => {
+	test('renders a historical record with a numeric description', async () => {
+		const dir = await createExport([fixture('Historical plugin')]);
+		const key = '1'.padStart(64, '0');
+		const path = `plugins/${key}/versions/${key}.json`;
+		const { artifact, record_version, ...record } = await Bun.file(join(dir, path)).json();
+		const metadata = { name: 'Historical plugin', description: 7, config_schema: { type: 'boolean' } };
+		await writeFile(join(dir, path), JSON.stringify({ ...record, validation: { ...artifact, metadata } }));
+
+		const site = join(dir, 'website');
+		expect(await buildSite(dir, site)).toBe(1);
+		const [plugin] = await Bun.file(join(site, 'assets/search-index.json')).json();
+		expect(plugin).toMatchObject({ name: 'Historical plugin', description: '' });
+		expect(await Bun.file(join(site, plugin.path)).text()).toContain('Historical plugin');
+		expect((await Bun.file(join(site, path)).json()).validation.metadata).toEqual(metadata);
+	});
+
 	test('monorepo packages keep their selectors and release statuses distinct', async () => {
 		const version = { version: 'v1.0.0', publishedAt: '2026-01-01T00:00:00Z', count: 2 };
 		const directory = await createExport([{

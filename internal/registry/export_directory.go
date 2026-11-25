@@ -13,7 +13,6 @@ import (
 const exportFiles = ".registry-export-files.json"
 const siteFiles = ".registry-site-files.json"
 
-// Build next to the destination so a failed build leaves the previous snapshot intact.
 func replaceExport(directory string, build func(string) error) error {
 	dest, err := filepath.Abs(directory)
 	if err != nil {
@@ -37,7 +36,7 @@ func replaceExport(directory string, build func(string) error) error {
 	if err != nil {
 		return err
 	}
-	// Leave a backup available if restoring the original directory fails.
+	// RemoveAll would also delete the backup if rollback fails.
 	defer func() { _ = os.Remove(work) }()
 	next := filepath.Join(work, "next")
 	if err := os.Mkdir(next, 0o755); err != nil {
@@ -80,21 +79,19 @@ func replaceExport(directory string, build func(string) error) error {
 	}
 	if err := os.Rename(next, dest); err != nil {
 		if restoreErr := os.Rename(previous, dest); restoreErr != nil {
-			return fmt.Errorf("publish export: %w (original snapshot at %s: %v)", err, previous, restoreErr)
+			return fmt.Errorf("replace export directory: %w (could not restore %s: %v)", err, previous, restoreErr)
 		}
 		return err
 	}
 	return os.RemoveAll(previous)
 }
 
-// Only replace empty directories and outputs entirely accounted for by the
-// exporter and renderer. A separate user file, even under plugins/, is kept.
 func checkExportOutput(directory string) error {
 	entries, err := os.ReadDir(directory)
 	if err != nil || len(entries) == 0 {
 		return err
 	}
-	owned := map[string]bool{".": true}
+	isDirectory := map[string]bool{".": true}
 	for _, manifest := range []string{exportFiles, siteFiles} {
 		filename := filepath.Join(directory, manifest)
 		if err := safePath(filename); err != nil {
@@ -111,14 +108,14 @@ func checkExportOutput(directory string) error {
 		if err := json.Unmarshal(data, &files); err != nil {
 			return fmt.Errorf("invalid %s: %w", manifest, err)
 		}
-		owned[manifest] = false
+		isDirectory[manifest] = false
 		for _, name := range files {
 			if !fs.ValidPath(name) || name == "." {
 				return fmt.Errorf("invalid path in %s: %q", manifest, name)
 			}
-			owned[name] = false
+			isDirectory[name] = false
 			for dir := path.Dir(name); dir != "."; dir = path.Dir(dir) {
-				owned[dir] = true
+				isDirectory[dir] = true
 			}
 		}
 	}
@@ -126,9 +123,9 @@ func checkExportOutput(directory string) error {
 		if err != nil {
 			return err
 		}
-		dir, ok := owned[name]
+		dir, ok := isDirectory[name]
 		if !ok || d.IsDir() != dir || (!dir && !d.Type().IsRegular()) {
-			return fmt.Errorf("export destination contains an unmanaged entry: %s", filepath.Join(directory, name))
+			return fmt.Errorf("unexpected file or directory in export: %s", filepath.Join(directory, name))
 		}
 		return nil
 	})

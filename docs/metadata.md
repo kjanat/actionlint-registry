@@ -13,23 +13,17 @@ of the authenticated release repository. The version must match the release tag
 after removing at most one leading lowercase `v` from each. License information is
 a publisher declaration, not an independent license audit.
 
-The registry retains the entire metadata object, including unknown fields and
-exact JSON numbers. Admission compiles each declared `config_schema`,
-`rules[].options_schema`, and `descriptor.options_schema` as JSON Schema Draft
-2020-12. A declaration is an object or boolean. A rule with an options schema
-must have a non-empty category and name, unique together within the release.
+Use JSON Schema Draft 2020-12 for `config_schema`, `rules[].options_schema`
+and `descriptor.options_schema`. Put shared definitions in that schema's
+`$defs`, then refer to them with a path such as `#/$defs/severity`. The registry
+checks every definition offline and rejects missing targets and duplicate `$id`
+values within a schema. Give each rule with options a non-empty `category` and
+`name`. Each pair must be unique within the plugin version.
 
-Each settings declaration is self-contained. A reference must resolve to a
-schema in that same declaration, including an embedded resource under `$defs`.
-Admission checks unused definitions as well as the root and rejects unsupported
-dialects, duplicate resource identifiers, and unresolved references. It never
-fetches a publisher URL. Export assigns each resource a version-specific
-identifier and updates its `$ref` and `$dynamicRef` targets, preserving
-anchors, exact numbers, and literal values in annotations.
-
-The actionlint host determines where settings apply in a project configuration
-and which providers accept a settings file. Other rule metadata, capabilities,
-and facts remain publisher declarations.
+The version record keeps every metadata field and its exact JSON numbers.
+The catalogue leaves the description blank on older records that stored it as
+something other than a string. Each exported schema has version-specific
+resource IDs, so an editor can load two plugin versions together.
 
 ## Multiple plugins in one repository
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { buildSite } from '#build.tsx';
 import { createExport, fixture } from '#test/fixtures.ts';
 
-test('100-plugin build emits 20-row static pages for every sort and preserves registry JSON', async () => {
+test('each sort lists 20 of the 100 plugins per page', async () => {
 	const directory = await createExport(
 		Array.from(
 			{ length: 100 },
@@ -31,7 +31,7 @@ test('100-plugin build emits 20-row static pages for every sort and preserves re
 	expect(named).toContain('href="../../plugins/');
 });
 
-test('empty export builds useful static fallback pages', async () => {
+test('an empty catalogue links to publishing instructions', async () => {
 	const directory = await createExport([]);
 	expect(await buildSite(directory, directory)).toBe(0);
 	const home = await readFile(join(directory, 'index.html'), 'utf8');
@@ -40,7 +40,7 @@ test('empty export builds useful static fallback pages', async () => {
 	expect(home).not.toContain('class="plugin-card"');
 });
 
-test('separate output preserves legacy records and tracks the files it copies', async () => {
+test('a separate output lists the legacy records it copies', async () => {
 	const directory = await createExport([fixture('Plugin')]);
 	await unlink(join(directory, 'downloads.json'));
 	const output = join(directory, 'website');
@@ -61,7 +61,7 @@ test('separate output preserves legacy records and tracks the files it copies', 
 	]);
 });
 
-test('removing a plugin requires a fresh snapshot and keeps the previous site intact', async () => {
+test('a rebuild refuses a nonempty output after a plugin is removed', async () => {
 	const source = await createExport([fixture('Removed')]);
 	const destination = join(source, 'website');
 	await buildSite(source, destination);
@@ -86,7 +86,7 @@ test('interactive pages load their client even without download observations', a
 	expect(await Bun.file(join(directory, '404.html')).text()).not.toContain('assets/client.js');
 });
 
-test('an in-place collision preserves existing files and removes newly staged paths', async () => {
+test('an existing file stops the in-place build and rolls back its new files', async () => {
 	const directory = await createExport([fixture('Plugin')]);
 	const sort = join(directory, 'sort');
 	await mkdir(sort);
@@ -98,7 +98,7 @@ test('an in-place collision preserves existing files and removes newly staged pa
 	expect(await readFile(conflict, 'utf8')).toBe('user file');
 });
 
-test('only regular files owned by the export can be published', async () => {
+test('the builder copies only regular files listed in the export manifest', async () => {
 	const source = await createExport([fixture('Plugin')]);
 	const paths = (await readdir(source, { recursive: true }))
 		.filter(path => path.endsWith('.json')).map(path => path.replaceAll('\\', '/'));
@@ -124,4 +124,30 @@ test('only regular files owned by the export can be published', async () => {
 	await symlink(empty, join(source, 'schemas'), 'dir');
 	await writeFile(marker, JSON.stringify([...paths, 'schemas/index.json']));
 	await expect(buildSite(source, join(empty, 'website'))).rejects.toThrow('missing or non-regular files');
+});
+
+test('an in-place build lists legacy export files and leaves private JSON out', async () => {
+	const directory = await createExport([fixture('Plugin')]);
+	await unlink(join(directory, 'downloads.json'));
+	const schemas = join(directory, 'schemas');
+	await mkdir(schemas);
+	await writeFile(join(schemas, 'notes.json'), '{}');
+	const root = `plugins/${'1'.padStart(64, '0')}`;
+	await buildSite(directory, directory);
+	expect(await Bun.file(join(directory, '.registry-export-files.json')).json()).toEqual([
+		'index.json',
+		`${root}/index.json`,
+		`${root}/versions/${'1'.padStart(64, '0')}.json`,
+		'statuses.json',
+	]);
+	expect(await readFile(join(schemas, 'notes.json'), 'utf8')).toBe('{}');
+});
+
+test('an in-place build leaves an existing export manifest byte-for-byte unchanged', async () => {
+	const directory = await createExport([]);
+	const marker = join(directory, '.registry-export-files.json');
+	const original = JSON.stringify(['statuses.json', 'downloads.json', 'index.json'], null, 2) + '\n';
+	await writeFile(marker, original);
+	await buildSite(directory, directory);
+	expect(await readFile(marker, 'utf8')).toBe(original);
 });

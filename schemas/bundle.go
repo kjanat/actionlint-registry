@@ -50,7 +50,7 @@ func Bundle() (map[string]any, error) {
 	}, nil
 }
 
-// CopyResources publishes the standalone resources at their canonical paths.
+// CopyResources copies the embedded *.schema.json files into directory.
 func CopyResources(directory string) error {
 	return os.CopyFS(directory, files)
 }

@@ -2,6 +2,8 @@ package registry
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"maps"
@@ -18,8 +20,6 @@ const (
 	configCatalogPath  = "schemas/plugin-config.catalog.json"
 )
 
-// The root, plugin, and version documents are directories of schema references.
-// A consumer applies a specific setting, never all plugin releases at once.
 type configSchemaIndex struct {
 	Dialect string                        `json:"$schema,omitempty"`
 	ID      string                        `json:"$id,omitempty"`
@@ -101,12 +101,16 @@ func exportConfigSchemas(index Index, directory string, statuses []ReleaseStatus
 			if catalogPlugin.URL == "" && (status == nil || status.Status == StatusActive) {
 				catalogPlugin.URL = release.ID
 				var info struct {
-					Description string `json:"description"`
+					Description jsontext.Value `json:"description"`
 				}
-				if err := json.Unmarshal(metadata, &info); err != nil {
+				if err := jsonv2.Unmarshal(metadata, &info); err != nil {
 					return err
 				}
-				catalogPlugin.Description = info.Description
+				if info.Description.Kind() == '"' {
+					if err := jsonv2.Unmarshal(info.Description, &catalogPlugin.Description); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		if len(plugin.Defs) != 0 {
@@ -125,7 +129,6 @@ func exportConfigSchemas(index Index, directory string, statuses []ReleaseStatus
 	return WriteJSON(filepath.Join(directory, configCatalogPath), catalog)
 }
 
-// Prepare the whole release before advertising any settings from it.
 func releaseSettings(metadata json.RawMessage, prefix string, release *configSchemaIndex) (map[string]json.RawMessage, error) {
 	settings, err := artifact.ConfigSettings(metadata)
 	if err != nil {

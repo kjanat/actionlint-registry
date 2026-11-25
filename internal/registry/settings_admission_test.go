@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestStoreGatesNewSettingsAndLoadsHistoricalRecords(t *testing.T) {
+func TestMergeChecksSchemasForNewVersions(t *testing.T) {
 	entry := acceptedFixture(t)
 	store := Store{Directory: filepath.Join(t.TempDir(), "plugins")}
 	candidate := Index{SchemaVersion: 1, Entries: []Entry{entry}}
@@ -21,7 +21,7 @@ func TestStoreGatesNewSettingsAndLoadsHistoricalRecords(t *testing.T) {
 		t.Fatalf("failed merge changed store: %v, %v", loaded, err)
 	}
 
-	// Recreate an older publication that predated schema validation.
+	// Simulate a version accepted before schema checks.
 	if err := os.MkdirAll(store.Directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -29,6 +29,6 @@ func TestStoreGatesNewSettingsAndLoadsHistoricalRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.Merge(candidate); err != nil {
-		t.Fatalf("idempotent merge of an immutable historical entry: %v", err)
+		t.Fatalf("merging the same version again: %v", err)
 	}
 }

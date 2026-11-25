@@ -9,6 +9,7 @@ import { loadCatalogue } from '#catalogue.ts';
 import { Home, NotFound, PluginPage } from '#components.tsx';
 import { pageSize, staticPath } from '#directory.ts';
 import type { Sort } from '#directory.ts';
+import { catalogueSchema, manifestSchema } from '#schema.ts';
 import type { SiteData } from '#schema.ts';
 
 const siteManifest = '.registry-site-files.json';
@@ -17,6 +18,9 @@ const publicJSON = /^(?:(?:index|statuses|downloads)\.json|(?:plugins|compatibil
 const decodeManifest = Schema.decodeUnknownSync(
 	Schema.fromJsonString(Schema.Array(Schema.String.check(Schema.isPattern(publicJSON)))),
 );
+
+const decodeCatalogue = Schema.decodeUnknownSync(Schema.fromJsonString(catalogueSchema));
+const decodePluginManifest = Schema.decodeUnknownSync(Schema.fromJsonString(manifestSchema));
 
 export async function buildSite(input: string, output: string): Promise<number> {
 	const source = resolve(input);
@@ -31,7 +35,8 @@ export async function buildSite(input: string, output: string): Promise<number> 
 		throw new Error('Site output must be an empty directory');
 	}
 
-	const exportPaths = await publicExportFiles(source, entries.includes(exportManifest), inPlace);
+	const hasExportManifest = entries.includes(exportManifest);
+	const exportPaths = await publicExportFiles(source, hasExportManifest, inPlace);
 	const staging = await mkdtemp(join(dirname(destination), '.registry-site-'));
 	try {
 		if (!inPlace) {
@@ -40,7 +45,6 @@ export async function buildSite(input: string, output: string): Promise<number> 
 				await mkdir(dirname(target), { recursive: true });
 				await copyFile(join(source, path), target);
 			}
-			await writeFile(join(staging, exportManifest), JSON.stringify([...exportPaths].sort()));
 		}
 		const data = await loadCatalogue(inPlace ? source : staging);
 		const linked = new Set(data.plugins.flatMap(plugin => [
@@ -54,8 +58,13 @@ export async function buildSite(input: string, output: string): Promise<number> 
 		}
 		const files = await renderSite(data, staging);
 		await writeFile(join(staging, siteManifest), JSON.stringify(files));
+		const generated = [...files, siteManifest];
+		if (!inPlace || !hasExportManifest) {
+			await writeFile(join(staging, exportManifest), JSON.stringify([...exportPaths].sort()));
+			generated.push(exportManifest);
+		}
 		if (inPlace) {
-			await addSiteFiles(staging, destination, [...files, siteManifest]);
+			await addSiteFiles(staging, destination, generated);
 		} else {
 			const mode = (await lstat(destination)).mode & 0o777;
 			await chmod(staging, mode);
@@ -74,7 +83,6 @@ export async function buildSite(input: string, output: string): Promise<number> 
 	}
 }
 
-// Adding to an export must never replace an existing path, including one created by a concurrent build.
 async function addSiteFiles(staging: string, destination: string, files: string[]) {
 	const directories = new Set([destination]);
 	const created: string[] = [];
@@ -107,13 +115,13 @@ async function addSiteFiles(staging: string, destination: string, files: string[
 }
 
 async function publicExportFiles(source: string, marked: boolean, inPlace: boolean): Promise<Set<string>> {
-	let owned: Set<string> | undefined;
+	let listed: Set<string> | undefined;
 	const directories = new Set<string>();
 	if (marked) {
 		const marker = join(source, exportManifest);
 		if (!(await lstat(marker)).isFile()) throw new Error(`Invalid export manifest: ${marker}`);
-		owned = new Set(decodeManifest(await readFile(marker, 'utf8')));
-		for (const file of owned) {
+		listed = new Set(decodeManifest(await readFile(marker, 'utf8')));
+		for (const file of listed) {
 			for (let dir = posix.dirname(file); dir !== '.'; dir = posix.dirname(dir)) directories.add(dir);
 		}
 	}
@@ -123,21 +131,48 @@ async function publicExportFiles(source: string, marked: boolean, inPlace: boole
 		for (const entry of await readdir(join(source, parent), { withFileTypes: true })) {
 			const path = posix.join(parent, entry.name);
 			if (path === exportManifest) continue;
-			const publicDirectory = owned
+			const publicDirectory = listed
 				? directories.has(path)
 				: parent !== '' || ['plugins', 'schemas', 'compatibility'].includes(path);
 			if (entry.isDirectory() && publicDirectory) {
 				await walk(path);
-			} else if (entry.isFile() && (owned?.has(path) ?? publicJSON.test(path))) {
+			} else if (entry.isFile() && (listed?.has(path) ?? publicJSON.test(path))) {
 				files.add(path);
-			} else if (owned && inPlace) {
+			} else if (listed && inPlace) {
 				throw new Error(`Unmanaged entry in site input: ${path}`);
 			}
 		}
 	}
 	await walk('');
-	if (owned && files.size !== owned.size) throw new Error('Export manifest lists missing or non-regular files');
-	return files;
+	if (listed && files.size !== listed.size) throw new Error('Export manifest lists missing or non-regular files');
+	return listed ? files : legacyExportFiles(source, files);
+}
+
+async function legacyExportFiles(source: string, files: Set<string>): Promise<Set<string>> {
+	const schemas = await readdir(new URL('../../schemas/', import.meta.url));
+	const exported = new Set([
+		'index.json', 'statuses.json', 'downloads.json', 'schemas/registry.schema.json',
+		...schemas.filter(name => name.endsWith('.schema.json')).map(name => `schemas/${name}`),
+	].filter(path => files.has(path)));
+	async function read(path: string) {
+		if (!files.has(path)) throw new Error(`Missing registry export file: ${path}`);
+		return readFile(join(source, path), 'utf8');
+	}
+	for (const { manifest } of decodeCatalogue(await read('index.json')).plugins) {
+		const { versions } = decodePluginManifest(await read(manifest));
+		exported.add(manifest);
+		for (const { record, compatibility } of versions) {
+			const path = posix.join(posix.dirname(manifest), record);
+			if (!files.has(path)) throw new Error(`Missing registry export file: ${path}`);
+			exported.add(path);
+			for (const { report } of compatibility ?? []) {
+				const evidence = posix.join(posix.dirname(manifest), report);
+				if (!files.has(evidence)) throw new Error(`Missing registry export file: ${evidence}`);
+				exported.add(evidence);
+			}
+		}
+	}
+	return exported;
 }
 
 async function renderSite(data: SiteData, output: string): Promise<string[]> {

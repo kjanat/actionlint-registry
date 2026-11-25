@@ -271,41 +271,34 @@ conflicting tool when replacing it, for example `--no-tool=shellcheck`.
 
 ### Plugin configuration schemas
 
-After installing your project's plugins, run this from the project root with the
-same actionlint binary you use for checks. It reads the project's plugin
-declarations and generates the complete configuration schema, including the
-installed providers' names, settings, shorthands and file-path support. If your
-checks load plugins through `--plugin`, pass the same flags to `config schema`.
+After installing plugins, generate the editor schema from the project root.
+Use the same actionlint version and `--plugin` flags you use for linting.
 
 ```sh
 actionlint config schema >.github/actionlint.local.schema.json
 ```
 
-For Tombi, put this on the first line of `.github/actionlint.toml`:
+For Tombi, start `.github/actionlint.toml` with this line.
 
 ```toml
 #:schema ./actionlint.local.schema.json
 ```
 
-For the VS Code YAML extension, put this on the first line of
-`.github/actionlint.yaml` or `.github/actionlint.yml`:
+For the VS Code YAML extension, start `.github/actionlint.yaml` or
+`.github/actionlint.yml` with this line.
 
 ```yaml
 # yaml-language-server: $schema=./actionlint.local.schema.json
 ```
 
-Regenerate the file when you change actionlint or any selected plugin.
+Rerun the command when you update actionlint or change plugins.
 
-Tools that need an individual plugin's settings can start at the
-[plugin schema index](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.schema.json).
-Follow the `$ref` in `$defs[plugin selector]`, then the `$ref` in
-`$defs[exact release tag]`. The release index links its declared configuration
-schema at `$defs.config` and rule option schemas at
-`$defs.rules.$defs[category].$defs[rule name]`. Each settings schema validates
-the settings value itself. The installed host determines its location in a
-project configuration. The [discovery catalog](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.catalog.json)
-lists plugins with an active release schema and their version URLs. The plugin
-schema index also preserves historical versions for plugins with no active schema.
+To look up one plugin's settings in the [schema index](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.schema.json),
+follow `$defs[plugin selector].$ref`, then `$defs[release tag].$ref`.
+The tag's index links to the plugin's settings at `$defs.config.$ref` and to
+individual rule options at `$defs.rules.$defs[category].$defs[rule name].$ref`.
+The [catalog](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.catalog.json)
+lists a default URL only for plugins with an active version that has a schema.
 
 ### Registry schema
 

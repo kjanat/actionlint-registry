@@ -157,3 +157,35 @@ func TestExportOmitsMalformedHistoricalSchema(t *testing.T) {
 		t.Fatalf("unexpected published releases: %+v", plugin.Defs)
 	}
 }
+
+func TestExportKeepsLegacySchemaWithNumericDescription(t *testing.T) {
+	entry := acceptedFixture(t)
+	decl := entry.Artifact
+	metadata := json.RawMessage(`{"name":"Historical plugin","description":7,"config_schema":{"type":"boolean"}}`)
+	entry.Artifact = nil
+	entry.RecordVersion = 0
+	entry.Validation = &LegacyValidation{
+		Kind: decl.Kind, PluginID: decl.PluginID, PluginVersion: decl.PluginVersion,
+		Repository: decl.Repository, Contract: decl.Contract, Metadata: metadata,
+		Rules: []string{"example"}, Checks: []string{"host-abi"}, HostCommit: strings.Repeat("a", 40), PolicyVersion: "1",
+	}
+	index := EmptyIndex()
+	if err := index.Add(entry); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := Export(index, dir, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var catalog configCatalog
+	if err := readRecord(filepath.Join(dir, configCatalogPath), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Schemas) != 1 || catalog.Schemas[0].Description != "" {
+		t.Fatalf("expected the plugin with an empty description, got %+v", catalog.Schemas)
+	}
+	version := readConfigIndex(t, dir, catalog.Schemas[0].URL)
+	if version.Defs["config"] == nil {
+		t.Fatalf("the catalog lost the valid plugin settings: %+v", version)
+	}
+}

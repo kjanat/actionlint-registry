@@ -16,15 +16,15 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// ConfigSetting identifies a self-contained settings schema in plugin metadata.
+// ConfigSetting holds a rule's options_schema or the plugin's config_schema.
+// For config_schema, Category and Name are empty.
 type ConfigSetting struct {
 	Category string
 	Name     string
 	Schema   json.RawMessage
 }
 
-// ConfigSettings validates each declaration independently. An unnamed setting
-// is the plugin's config_schema; named settings are rule options.
+// ConfigSettings compiles config_schema and each options_schema in rules or descriptor.
 func ConfigSettings(metadata json.RawMessage) ([]ConfigSetting, error) {
 	var fields struct {
 		Config     json.RawMessage `json:"config_schema"`
@@ -69,7 +69,6 @@ func ConfigSettings(metadata json.RawMessage) ([]ConfigSetting, error) {
 		if i == len(rules) {
 			location = "descriptor"
 		}
-		// Descriptors without an options schema remain opaque to the registry.
 		var descriptor map[string]json.RawMessage
 		if err := jsonv2.Unmarshal(raw, &descriptor); err != nil {
 			return nil, fmt.Errorf("%s: %w", location, err)
@@ -92,8 +91,7 @@ func ConfigSettings(metadata json.RawMessage) ([]ConfigSetting, error) {
 	return settings, nil
 }
 
-// The retrieval URI used to resolve publisher-relative references before export.
-// Every target must exist inside this same declaration.
+// Resolve relative $id and $ref values against this URL until the release URL is known.
 const settingBase = "https://registry.invalid/setting.schema.json"
 
 type schemaNode struct {
@@ -152,8 +150,7 @@ func (d *settingDocument) collect(value any, ptr jsontext.Pointer, base *url.URL
 	}
 	d.nodes = append(d.nodes, schemaNode{ptr, obj, base})
 	d.locations[ptr] = true
-	// Visit schema positions in the 2020-12 vocabularies. An object in enum,
-	// examples, default or another annotation is instance data, even if it has $id.
+	// Only descend into Draft 2020-12 subschemas. An $id inside a default is literal data.
 	for keyword, child := range obj {
 		at := ptr.AppendToken(keyword)
 		switch keyword {
@@ -184,8 +181,7 @@ func (d *settingDocument) collect(value any, ptr jsontext.Pointer, base *url.URL
 	return nil
 }
 
-// RFC 3986 sections 2 and 3. net/url.Parse resolves URI references, but also
-// accepts characters such as | and { and silently escapes them on serialization.
+// RFC 3986, sections 2 and 3. net/url accepts a raw | in a path and rewrites it as %7C.
 const (
 	uriChar   = `(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f]{2})` // unreserved / sub-delims / pct-encoded
 	pathChar  = `(?:` + uriChar + `|[:@])`
@@ -217,8 +213,8 @@ func schemaURI(value any) (*url.URL, error) {
 	return u, nil
 }
 
-// Resolve every reference against its original resource. On export, translate the
-// resource URI and preserve the pointer or anchor fragment (including dynamic anchors).
+// With a release URL, rewrite the target of each $ref and $dynamicRef. Copy the
+// original fragment so JSON Pointers and dynamic anchors still select the same subschema.
 func (d *settingDocument) references(published *url.URL) error {
 	for _, node := range d.nodes {
 		for _, keyword := range []string{"$ref", "$dynamicRef"} {
@@ -260,7 +256,6 @@ func publishedResource(root *url.URL, ptr jsontext.Pointer) url.URL {
 	return resource
 }
 
-// JSON Schema patterns use ECMAScript syntax, including lookahead and backreferences.
 type schemaPattern struct{ *jsregexp.Regexp }
 
 func (p schemaPattern) MatchString(s string) bool {
@@ -284,8 +279,7 @@ func (d *settingDocument) compile(retrieval string) error {
 	if err := c.AddResource(retrieval, d.root); err != nil {
 		return err
 	}
-	// Compile even unused definitions. Compiling only the root can leave an
-	// unresolved anchor or a malformed regular expression inside $defs unchecked.
+	// Compiling the root alone skips unused entries in $defs.
 	for _, node := range d.nodes {
 		loc := url.URL{Fragment: string(node.ptr)}
 		if _, err := c.Compile(retrieval + loc.String()); err != nil {
@@ -295,8 +289,8 @@ func (d *settingDocument) compile(retrieval string) error {
 	return nil
 }
 
-// Rebase gives each embedded resource a release-specific canonical identity.
-// References keep their meaning when clients load multiple versions together.
+// Rebase sets the root $id to the setting URL. Nested resources use the same URL
+// with their JSON Pointer in the resource query parameter.
 func (s ConfigSetting) Rebase(id string) (json.RawMessage, error) {
 	d, err := s.document()
 	if err != nil {
