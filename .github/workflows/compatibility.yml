@@ -1,0 +1,234 @@
+name: Check accepted plugins
+
+on:
+  push:
+    branches: [master]
+    paths: &inputs
+      - .github/workflows/compatibility.yml
+      - adapters/actionlint/**
+      - cmd/registry/**
+      - internal/artifact/**
+      - internal/compatibility/**
+      - internal/registry/**
+      - go.mod
+      - go.sum
+      - registry/plugins/**/versions/*.json
+      - registry/status/**
+  pull_request:
+    paths: *inputs
+  schedule:
+    - cron: "47 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+cache-mode: none
+
+concurrency:
+  group: compatibility-${{ github.event.pull_request.number || 'master' }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read }
+    outputs:
+      source: ${{ steps.plan.outputs.source }}
+      plan: ${{ steps.selection.outputs.artifact-id }}
+      count: ${{ steps.plan.outputs.count }}
+      unavailable: ${{ steps.plan.outputs.unavailable }}
+      tools: ${{ steps.tools.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'refs/heads/master' }}
+          persist-credentials: false
+      - &go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with: { go-version-file: go.mod, cache: false }
+      - &checker
+        name: Build checker
+        id: checker
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          go -C adapters/actionlint build -mod=readonly -trimpath -buildvcs=false -o "$RUNNER_TEMP/tools/checker" .
+          version=$(go -C adapters/actionlint list -mod=readonly -m -f '{{.Version}}' actionlint.kjanat.dev/v2)
+          revision=${version##*-}
+          [[ "$revision" =~ ^[a-f0-9]{12}$ ]]
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+          digest=$(sha256sum "$RUNNER_TEMP/tools/checker")
+          printf 'digest=%s\n' "${digest%% *}" >> "$GITHUB_OUTPUT"
+      - name: Select releases
+        id: plan
+        env:
+          CHECKER_SHA256: ${{ steps.checker.outputs.digest }}
+          HOST_REVISION: ${{ steps.checker.outputs.revision }}
+        run: |
+          go build -mod=readonly -o "$RUNNER_TEMP/tools/registry" ./cmd/registry
+          "$RUNNER_TEMP/tools/registry" plan-compatibility \
+            --checker-sha256 "$CHECKER_SHA256" --host-revision "$HOST_REVISION" \
+            --limit 16 --offset "$GITHUB_RUN_NUMBER" --report "$RUNNER_TEMP/plan.json"
+          jq -r '"count=\(.targets | length)", "unavailable=\(.unavailable | length)"' "$RUNNER_TEMP/plan.json" >> "$GITHUB_OUTPUT"
+          jq -r '.unavailable[]? | "- `\(.plugin)@\(.version)`: OCI layer inventory unavailable"' "$RUNNER_TEMP/plan.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          printf 'source=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        id: selection
+        if: steps.plan.outputs.count != '0'
+        with:
+          name: compatibility-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/plan.json
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        id: tools
+        if: steps.plan.outputs.count != '0'
+        with:
+          name: compatibility-tools-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/tools/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Report unavailable inventory
+        if: steps.plan.outputs.count == '0' && steps.plan.outputs.unavailable != '0'
+        run: exit 1
+
+  check:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions: { contents: read }
+    outputs:
+      reports: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { ref: "${{ needs.plan.outputs.source }}", persist-credentials: false }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: ${{ needs.plan.outputs.tools }},${{ needs.plan.outputs.plan }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/tools
+      - name: Check releases
+        id: check
+        run: |
+          plan="$RUNNER_TEMP/tools/plan.json"
+          chmod +x "$RUNNER_TEMP/tools/"{registry,checker}
+          checker_sha=$(jq -r .checker_sha256 "$plan")
+          host=$(jq -r .host_revision "$plan")
+          mkdir "$RUNNER_TEMP/reports"
+          unavailable=0
+          jq -r '.targets[] | [.plugin, .version, .sha256] | @tsv' "$plan" > "$RUNNER_TEMP/targets.tsv"
+          while IFS=$'\t' read -r plugin version digest; do
+            if bash scripts/validate.sh timeout --kill-after=10s 120s "$RUNNER_TEMP/tools/registry" check-accepted \
+              --plugin "$plugin" --version "$version" --sha256 "$digest" \
+              --checker "$RUNNER_TEMP/tools/checker" --checker-sha256 "$checker_sha" --host-revision "$host" \
+              --report "$RUNNER_TEMP/$digest.json"; then
+              mv "$RUNNER_TEMP/$digest.json" "$RUNNER_TEMP/reports/$digest.json"
+              outcome=$(jq -r '[.[].report.outcome] | unique | join(", ")' "$RUNNER_TEMP/reports/$digest.json")
+            else
+              touch "$RUNNER_TEMP/reports/$digest.unavailable"
+              unavailable=$((unavailable + 1))
+              outcome=unavailable
+            fi
+            printf -- '- `%s@%s`: %s\n' "$plugin" "$version" "$outcome" | tee -a "$GITHUB_STEP_SUMMARY"
+          done < "$RUNNER_TEMP/targets.tsv"
+          printf 'unavailable=%d\n' "$unavailable" >> "$GITHUB_OUTPUT"
+          printf '\nSelected %s releases for host `%s`. Unavailable: %d.\n' "$(wc -l < "$RUNNER_TEMP/targets.tsv")" "$host" "$unavailable" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        id: upload
+        with:
+          name: compatibility-reports-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/reports/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Verify catalogue
+        if: github.event_name == 'pull_request'
+        run: |
+          plan="$RUNNER_TEMP/tools/plan.json"
+          "$RUNNER_TEMP/tools/registry" import-compatibility \
+            --checker-sha256 "$(jq -r .checker_sha256 "$plan")" --host-revision "$(jq -r .host_revision "$plan")" \
+            --plan "$plan" --reports "$RUNNER_TEMP/reports"
+          "$RUNNER_TEMP/tools/registry" export --output "$RUNNER_TEMP/catalogue"
+      - name: Report unavailable checks
+        if: steps.check.outputs.unavailable != '0' || needs.plan.outputs.unavailable != '0'
+        run: exit 1
+
+  publish:
+    needs: [plan, check]
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+      && needs.plan.result == 'success' && needs.check.outputs.reports != ''
+    concurrency:
+      group: registry-admission
+      cancel-in-progress: false
+      queue: max
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: { contents: read }
+    outputs:
+      changed: ${{ steps.import.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { ref: refs/heads/master, persist-credentials: false }
+      - *go
+      - *checker
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: ${{ needs.check.outputs.reports }}
+          path: ${{ runner.temp }}/reports
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: ${{ needs.plan.outputs.plan }}
+          path: ${{ runner.temp }}/selection
+      # The publisher checks current release status and verifies historical OCI layers from the pinned manifests.
+      - name: Import reports
+        id: import
+        env:
+          CHECKER_SHA256: ${{ steps.checker.outputs.digest }}
+          HOST_REVISION: ${{ steps.checker.outputs.revision }}
+        run: |
+          plan="$RUNNER_TEMP/selection/plan.json"
+          if ! jq -e --arg digest "$CHECKER_SHA256" --arg host "$HOST_REVISION" \
+            '.checker_sha256 == $digest and .host_revision == $host' "$plan" >/dev/null; then
+            echo 'Checker changed while checks ran. The next plan uses the new checker.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          bash scripts/validate.sh go run ./cmd/registry import-compatibility --plan "$plan" --reports "$RUNNER_TEMP/reports" \
+            --checker-sha256 "$CHECKER_SHA256" --host-revision "$HOST_REVISION"
+          go run ./cmd/registry export --output "$RUNNER_TEMP/catalogue"
+          if [[ -d registry/compatibility ]]; then git add -- registry/compatibility; fi
+          if ! git diff --cached --quiet; then echo 'changed=true' >> "$GITHUB_OUTPUT"; fi
+      - name: Create registry bot installation token
+        if: steps.import.outputs.changed == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3
+        with:
+          client-id: ${{ vars.REGISTRY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REGISTRY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      - name: Publish reports
+        if: steps.import.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          [[ "$APP_SLUG" =~ ^[a-z0-9-]+$ ]]
+          bot_id=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
+          [[ "$bot_id" =~ ^[0-9]+$ ]]
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          gh auth setup-git
+          git commit -m 'chore(registry): publish compatibility observations'
+          git push origin HEAD:refs/heads/master
+
+  pages:
+    needs: publish
+    if: "!cancelled() && needs.publish.result == 'success' && needs.publish.outputs.changed == 'true'"
+    permissions: { contents: read, pages: write, id-token: write }
+    uses: $/.github/workflows/pages.yml
+    with: { registry-publication: true }

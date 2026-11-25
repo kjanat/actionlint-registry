@@ -48,6 +48,13 @@ export const catalogueSchema = Schema.Struct({
 	})),
 });
 
+const compatibilityLink = Schema.Struct({
+	host: Schema.Struct({ name: Schema.NonEmptyString, revision: Schema.NonEmptyString }),
+	policy: Schema.NonEmptyString,
+	outcome: Schema.Literals(['passed', 'failed', 'unsupported']),
+	report: Schema.String.check(Schema.isPattern(/^\.\.\/\.\.\/compatibility\/[a-f0-9]{64}\/[a-f0-9]{64}\.json$/)),
+});
+
 export const manifestSchema = Schema.Struct({
 	plugin: Schema.Struct({
 		schema_version: Schema.Literals([1, 2]).pipe(Schema.withDecodingDefault(Effect.succeed(1))),
@@ -60,9 +67,7 @@ export const manifestSchema = Schema.Struct({
 		Schema.Struct({
 			version: Schema.String,
 			record: Schema.String.check(Schema.isPattern(/^versions\/[a-f0-9]{64}\.json$/)),
-			compatibility: Schema.Array(Schema.Struct({
-				report: Schema.String.check(Schema.isPattern(/^\.\.\/\.\.\/compatibility\/[a-f0-9]{64}\/[a-f0-9]{64}\.json$/)),
-			})).pipe(Schema.optionalKey),
+			compatibility: Schema.Array(compatibilityLink).pipe(Schema.optionalKey),
 			imports: interfaceNames.pipe(Schema.optionalKey),
 			exports: interfaceNames.pipe(Schema.optionalKey),
 		}).check(Schema.makeFilter(version => (version.imports === undefined) === (version.exports === undefined), {
@@ -186,6 +191,7 @@ export interface Release {
 	reason: string;
 	replacement: string;
 	downloads: Metric;
+	compatibility: ReadonlyArray<typeof compatibilityLink.Type>;
 	interfaces: { imports: string[]; exports: string[] } | null;
 }
 

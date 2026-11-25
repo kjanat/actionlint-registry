@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { chmod, mkdir, readdir, readFile, stat, symlink, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { buildSite } from '#build.tsx';
 import { createExport, fixture } from '#test/fixtures.ts';
 
@@ -150,4 +150,48 @@ test('an in-place build leaves an existing export manifest byte-for-byte unchang
 	await writeFile(marker, original);
 	await buildSite(directory, directory);
 	expect(await readFile(marker, 'utf8')).toBe(original);
+});
+
+test('each release links its host reports or shows Unverified', async () => {
+	const sha256 = 'a'.repeat(64);
+	const compatibility = (['passed', 'failed', 'unsupported'] as const).map((outcome, i) => ({
+		host: { name: 'actionlint', revision: `v${i + 1}` },
+		policy: 'component-v3',
+		outcome,
+		report: `../../compatibility/${sha256}/${String(i).repeat(64)}.json`,
+	}));
+	const directory = await createExport([{
+		name: 'Plugin',
+		versions: [
+			{ version: 'v2', publishedAt: '2026-03-02T00:00:00Z', count: 0, sha256, compatibility },
+			{ version: 'v1', publishedAt: '2026-03-01T00:00:00Z', count: 0 },
+		],
+	}]);
+	const plugin = `plugins/${'1'.padStart(64, '0')}`;
+	for (const { report, ...check } of compatibility) {
+		const file = resolve(directory, plugin, report);
+		await mkdir(dirname(file), { recursive: true });
+		await writeFile(file, JSON.stringify({
+			observed_at: '2026-03-03T00:00:00Z',
+			checker_sha256: 'b'.repeat(64),
+			report: {
+				schema_version: 1,
+				artifact_sha256: sha256,
+				checks: ['instantiate'],
+				...check,
+				...(check.outcome === 'passed' ? {} : { detail: 'Host could not instantiate this component' }),
+			},
+		}));
+	}
+	const output = join(directory, 'website');
+	await buildSite(directory, output);
+	const html = await readFile(join(output, plugin, 'index.html'), 'utf8');
+	const [v2, v1] = html.split('<li class="release"').slice(1);
+	expect(v1).toContain('<dt>Host compatibility</dt><dd>Unverified</dd>');
+	expect(v2).not.toContain('Unverified');
+	for (const check of compatibility) {
+		const label = `${check.host.name}@${check.host.revision} · ${check.outcome}`;
+		expect(v2).toContain(`href="${check.report}">${label}</a> (${check.policy})`);
+		expect(await Bun.file(resolve(output, plugin, check.report)).json()).toHaveProperty('checker_sha256', 'b'.repeat(64));
+	}
 });

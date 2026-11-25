@@ -6,6 +6,11 @@ on:
     - cron: "23 */6 * * *"
   workflow_dispatch:
   workflow_call:
+    inputs:
+      registry-publication:
+        description: Deploy the registry writer's committed records.
+        type: boolean
+        default: false
 
 permissions: {}
 cache-mode: none
@@ -18,7 +23,7 @@ concurrency:
 jobs:
   build:
     # Admission deploys its App commit explicitly before completing the publication lease.
-    if: github.event_name != 'push' || github.actor != 'actionlint-plugin-registry[bot]'
+    if: inputs.registry-publication || github.event_name != 'push' || github.actor != 'actionlint-plugin-registry[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: { contents: read }

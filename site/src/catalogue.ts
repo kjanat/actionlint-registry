@@ -120,6 +120,7 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 				reason: status?.reason ?? '',
 				replacement: status?.replacement ?? '',
 				downloads: releaseMetric(entry, downloads),
+				compatibility: version.compatibility ?? [],
 				interfaces: version.imports && version.exports
 					? { imports: version.imports, exports: version.exports }
 					: null,

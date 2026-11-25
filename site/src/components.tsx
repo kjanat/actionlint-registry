@@ -416,6 +416,15 @@ export function PluginPage({ plugin, observedAt }: { plugin: Plugin; observedAt:
 											<Time value={release.publishedAt} />
 										</dd>
 									</div>
+									<div>
+										<dt>Host compatibility</dt>
+										{release.compatibility.length === 0 ? <dd>Unverified</dd> : release.compatibility.map(check => (
+											<dd key={check.report}>
+												<a href={check.report}>{check.host.name}@{check.host.revision} · {check.outcome}</a>
+												{' '}({check.policy})
+											</dd>
+										))}
+									</div>
 								</dl>
 								{release.interfaces && (
 									<dl class='interfaces'>

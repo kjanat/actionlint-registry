@@ -42,6 +42,19 @@ func TestMain(m *testing.M) {
 	if len(args) == 3 && args[0] == "--runner-as-of" {
 		runnerAsOf, args = args[1], args[2:]
 	}
+	if len(args) == 1 && filepath.Base(args[0]) == "plugin.json" {
+		if data, err := os.ReadFile(args[0]); err == nil && bytes.Equal(data, processBody()) {
+			report := compatibility.Report{
+				SchemaVersion: compatibility.ProtocolVersion, ArtifactSHA256: key(string(data)), RunnerAsOf: runnerAsOf,
+				Host: compatibility.Host{Name: "actionlint", Revision: batchTestRevision}, Policy: "actionlint-smoke/1",
+				Outcome: "unsupported", Checks: []string{}, Detail: "process/1 requires a process-aware checker",
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+				os.Exit(8)
+			}
+			os.Exit(0)
+		}
+	}
 	if len(args) == 1 && filepath.Base(args[0]) == "plugin.wasm" {
 		data, err := os.ReadFile(args[0])
 		if err != nil || os.Getenv("GH_TOKEN") != "" || bytes.Equal(data, []byte("crash")) {

@@ -2,14 +2,10 @@ package registry
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -45,7 +41,11 @@ func newGitHub(token string, transport http.RoundTripper) (*GitHub, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GitHub API client: %w", err)
 	}
-	return &GitHub{api: apiClient, download: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	return &GitHub{api: apiClient, download: githubDownloadClient()}, nil
+}
+
+func githubDownloadClient() *http.Client {
+	return &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) > 5 {
 			return errors.New("too many asset redirects")
 		}
@@ -53,7 +53,7 @@ func newGitHub(token string, transport http.RoundTripper) (*GitHub, error) {
 			return errors.New("asset redirect outside GitHub release storage")
 		}
 		return nil
-	}}}, nil
+	}}
 }
 
 // Set the API version in the shared transport so neither SDK can override it
@@ -146,33 +146,7 @@ func (g *GitHub) Resolve(ctx context.Context, s Submission) (Entry, *github.Rele
 }
 
 func (g *GitHub) Download(ctx context.Context, s Submission, asset *github.ReleaseAsset, path string) (err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.GetBrowserDownloadURL(), nil)
-	if err != nil {
-		return err
-	}
-	// No API credential is sent to release downloads or their CDN redirects.
-	resp, err := g.download.Do(req)
-	if err != nil {
-		return errors.New("release asset download failed")
-	}
-	defer func() { err = errors.Join(err, resp.Body.Close()) }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("release asset download: HTTP %d", resp.StatusCode)
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, MaxArtifactBytes+1))
-	closeErr := f.Close()
-	if err = errors.Join(copyErr, closeErr); err != nil {
-		return err
-	}
-	if n != int64(asset.GetSize()) || n > MaxArtifactBytes || hex.EncodeToString(h.Sum(nil)) != s.Digest() {
-		return errors.New("download size or SHA256 does not match release asset")
-	}
-	return nil
+	return downloadAsset(ctx, g.download, asset.GetBrowserDownloadURL(), path, s.Digest(), int64(asset.GetSize()))
 }
 
 // Candidates lists a limited number of recent releases. Publishers can submit older versions directly.

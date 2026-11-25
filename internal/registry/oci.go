@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -237,23 +238,50 @@ type OCILayer func(digest, mediaType string, data []byte) error
 
 type OCIWalker func(ctx context.Context, reference string, layer OCILayer) (artifact.Declaration, error)
 
-func (o *OCIInspector) Walk(ctx context.Context, reference string, layer OCILayer) (result artifact.Declaration, err error) {
+func (o *OCIInspector) Walk(ctx context.Context, reference string, layer OCILayer) (artifact.Declaration, error) {
+	distribution, source, err := o.remoteObjects(reference)
+	if err != nil {
+		return artifact.Declaration{}, err
+	}
+	source.primary = layer
+	return inspectOCI(ctx, distribution, source)
+}
+
+// PrimaryLayerDigests reads digest-verified indexes and manifests to identify every
+// primary layer of an accepted OCI release without fetching or inspecting its blobs.
+func (o *OCIInspector) PrimaryLayerDigests(ctx context.Context, reference string) ([]string, error) {
+	distribution, source, err := o.remoteObjects(reference)
+	if err != nil {
+		return nil, err
+	}
+	var layers []string
+	err = source.walkManifests(ctx, distribution.digest, func(_ context.Context, _ ociDocument, primary ociDescriptor) error {
+		layers = append(layers, strings.TrimPrefix(primary.Digest, "sha256:"))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	slices.Sort(layers)
+	return slices.Compact(layers), nil
+}
+
+func (o *OCIInspector) remoteObjects(reference string) (Distribution, ociObjects, error) {
 	distribution, err := OCIReference(reference)
 	if err != nil {
-		return result, err
+		return Distribution{}, ociObjects{}, err
 	}
 	u, _ := url.Parse(reference)
 	repository, _, _ := strings.Cut(strings.TrimPrefix(u.Path, "/"), "@")
 	base := "https://" + u.Host + "/v2/" + repository
-	return inspectOCI(ctx, distribution, ociObjects{
+	return distribution, ociObjects{
 		manifest: func(ctx context.Context, digest string, limit int64) ([]byte, error) {
 			return o.fetch(ctx, base+"/manifests/"+digest, repository, limit)
 		},
 		blob: func(ctx context.Context, digest string, limit int64) ([]byte, error) {
 			return o.fetch(ctx, base+"/blobs/"+digest, repository, limit)
 		},
-		primary: layer,
-	})
+	}, nil
 }
 
 type ociRead func(context.Context, string, int64) ([]byte, error)
@@ -294,21 +322,69 @@ func (s ociObjects) content(ctx context.Context, descriptor ociDescriptor, limit
 	return data, ctx.Err()
 }
 
-// Public registries and local layouts share graph admission rules. Readers
-// acquire bytes; only this traversal interprets their descriptors.
 func inspectOCI(ctx context.Context, distribution Distribution, source ociObjects) (result artifact.Declaration, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 75*time.Second)
-	defer cancel()
 	directory, err := os.MkdirTemp("", "registry-oci-")
 	if err != nil {
 		return result, err
 	}
 	defer func() { err = errors.Join(err, os.RemoveAll(directory)) }()
+	err = source.walkManifests(ctx, distribution.digest, func(ctx context.Context, manifest ociDocument, primary ociDescriptor) error {
+		if _, err := source.content(ctx, *manifest.Config, manifest.Config.Size, source.blob); err != nil {
+			return err
+		}
+		var data []byte
+		blobs := make(map[string]ociDescriptor, len(manifest.Layers))
+		for _, layer := range manifest.Layers {
+			content, err := source.content(ctx, layer, layer.Size, source.blob)
+			if err != nil {
+				return err
+			}
+			blobs[layer.Digest] = layer
+			if layer.Digest == primary.Digest {
+				data = content
+			}
+		}
+		if primary.MediaType == ociProcess {
+			if err := validateProcessBlobs(data, blobs); err != nil {
+				return err
+			}
+		}
+		path := filepath.Join(directory, "primary")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			return err
+		}
+		declared, err := artifact.Inspect(ctx, path)
+		if err != nil {
+			return err
+		}
+		if primary.MediaType == ociProcess && declared.Kind != "manifest" || primary.MediaType == ociWASM && declared.Kind == "manifest" {
+			return reject("OCI layer media type disagrees with package kind")
+		}
+		if result.PluginID != "" && !sameDeclaration(result, declared) {
+			return reject("OCI platform variants disagree on discovery metadata or contract")
+		}
+		result = declared
+		if source.primary != nil {
+			return source.primary(primary.Digest, primary.MediaType, data)
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	result.SHA256 = distribution.digest
+	return result, result.Validate()
+}
+
+// Admission and inventory use the same digest verification, graph limits and primary layer selection.
+func (source ociObjects) walkManifests(ctx context.Context, digest string, inspect func(context.Context, ociDocument, ociDescriptor) error) error {
+	ctx, cancel := context.WithTimeout(ctx, 75*time.Second)
+	defer cancel()
 	var total int64
 	objects := 0
 	active := map[string]bool{}
 	var root []byte
-	rootDigest := "sha256:" + distribution.digest
+	rootDigest := "sha256:" + digest
 	var visit func(ociDescriptor, int) error
 	visit = func(descriptor ociDescriptor, depth int) error {
 		var err error
@@ -360,11 +436,8 @@ func inspectOCI(ctx context.Context, distribution Distribution, source ociObject
 		default:
 			return reject("unsupported OCI manifest media type")
 		}
-		descriptors := append([]ociDescriptor{*document.Config}, document.Layers...)
-		var primary []byte
-		primaryType, primaryDigest := "", ""
-		blobs := map[string]ociDescriptor{}
-		for position, blob := range descriptors {
+		var primary ociDescriptor
+		for position, blob := range append([]ociDescriptor{*document.Config}, document.Layers...) {
 			if err = validateDescriptor(blob); err != nil {
 				return err
 			}
@@ -372,68 +445,28 @@ func inspectOCI(ctx context.Context, distribution Distribution, source ociObject
 			if total > 2*MaxArtifactBytes {
 				return reject("OCI graph exceeds 128 MiB")
 			}
-			content, err := source.content(ctx, blob, blob.Size, source.blob)
-			if err != nil {
-				return err
-			}
-			if err = verifyOCI(content, blob.Digest, blob.Size); err != nil {
-				return err
-			}
-			if position == 0 {
+			if position == 0 || (blob.MediaType != ociWASM && blob.MediaType != ociProcess) {
 				continue
 			}
-			blobs[blob.Digest] = blob
-			if blob.MediaType == ociWASM || blob.MediaType == ociProcess {
-				if primary != nil {
-					return reject("OCI manifest requires exactly one primary plugin layer")
-				}
-				primary, primaryType, primaryDigest = content, blob.MediaType, blob.Digest
+			if primary.Digest != "" {
+				return reject("OCI manifest requires exactly one primary plugin layer")
 			}
+			primary = blob
 		}
-		if primary == nil {
+		if primary.Digest == "" {
 			return reject("OCI manifest has no supported primary plugin layer")
 		}
-		if primaryType == ociProcess {
-			if err = validateProcessBlobs(primary, blobs); err != nil {
-				return err
-			}
-		}
-		path := filepath.Join(directory, "primary")
-		if err = os.WriteFile(path, primary, 0o600); err != nil {
-			return err
-		}
-		declared, err := artifact.Inspect(ctx, path)
-		if err != nil {
-			return err
-		}
-		if primaryType == ociProcess && declared.Kind != "manifest" || primaryType == ociWASM && declared.Kind == "manifest" {
-			return reject("OCI layer media type disagrees with package kind")
-		}
-		if result.PluginID != "" && !sameDeclaration(result, declared) {
-			return reject("OCI platform variants disagree on discovery metadata or contract")
-		}
-		result = declared
-		if source.primary != nil {
-			return source.primary(primaryDigest, primaryType, primary)
-		}
-		return nil
+		return inspect(ctx, document, primary)
 	}
-	root, err = source.content(ctx, ociDescriptor{Digest: rootDigest, Size: -1}, 4<<20, source.manifest)
+	root, err := source.content(ctx, ociDescriptor{Digest: rootDigest, Size: -1}, 4<<20, source.manifest)
 	if err != nil {
-		return result, err
-	}
-	if err = verifyOCI(root, "sha256:"+distribution.digest, -1); err != nil {
-		return result, err
+		return err
 	}
 	var document ociDocument
 	if err = jsonv2.Unmarshal(root, &document); err != nil {
-		return result, reject("invalid OCI root document")
+		return reject("invalid OCI root document")
 	}
-	if err = visit(ociDescriptor{MediaType: document.MediaType, Digest: "sha256:" + distribution.digest, Size: int64(len(root))}, 0); err != nil {
-		return result, err
-	}
-	result.SHA256 = distribution.digest
-	return result, result.Validate()
+	return visit(ociDescriptor{MediaType: document.MediaType, Digest: rootDigest, Size: int64(len(root))}, 0)
 }
 
 func validateProcessBlobs(data []byte, blobs map[string]ociDescriptor) error {

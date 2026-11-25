@@ -2,7 +2,7 @@ import { afterEach } from 'bun:test';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { ReleaseState } from '#schema.ts';
+import type { Release, ReleaseState } from '#schema.ts';
 
 export interface VersionFixture {
 	version: string;
@@ -14,6 +14,7 @@ export interface VersionFixture {
 	replacement?: string;
 	metadata?: Record<string, unknown>;
 	source?: { type: 'release-asset'; name: string } | { type: 'oci'; reference: string };
+	compatibility?: Release['compatibility'];
 	interfaces?: { imports?: string[]; exports?: string[] };
 }
 export interface PluginFixture {
@@ -61,7 +62,12 @@ export async function createExport(plugins: PluginFixture[]): Promise<string> {
 			const sha256 = sourceDigest ?? version.sha256 ?? (index * 100 + versionIndex + 1).toString(16).padStart(64, 'a');
 			const record = `versions/${hash}.json`;
 			const asset_id = version.source?.type === 'oci' ? 0 : index * 100 + versionIndex + 1;
-			versions.push({ version: version.version, record, compatibility: [], ...version.interfaces });
+			versions.push({
+				version: version.version,
+				record,
+				compatibility: version.compatibility ?? [],
+				...version.interfaces,
+			});
 			await write(`plugins/${key}/${record}`, {
 				record_version: 2,
 				...(plugin.identityVersion === 2 ? { identity_version: 2 } : {}),

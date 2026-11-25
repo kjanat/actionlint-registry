@@ -33,16 +33,7 @@ func (store EvidenceStore) Recheck(ctx context.Context, index Index, executable,
 	if err != nil {
 		return nil, err
 	}
-	runnerAsOf := ""
-	var earliest time.Time
-	for _, evidence := range stored {
-		if evidence.Release() != entry.Submission.Digest() || evidence.Report.RunnerAsOf == "" {
-			continue
-		}
-		if runnerAsOf == "" || evidence.ObservedAt.Before(earliest) {
-			runnerAsOf, earliest = evidence.Report.RunnerAsOf, evidence.ObservedAt
-		}
-	}
+	runnerAsOf := releaseRunnerAsOf(stored, entry.Submission.Digest())
 	observed, err := CheckCompatibility(ctx, executable, path, entry, runnerAsOf, walk)
 	if err != nil {
 		return nil, err
@@ -53,6 +44,20 @@ func (store EvidenceStore) Recheck(ctx context.Context, index Index, executable,
 		}
 	}
 	return observed, nil
+}
+
+func releaseRunnerAsOf(stored []compatibility.Evidence, release string) string {
+	runnerAsOf := ""
+	var earliest time.Time
+	for _, evidence := range stored {
+		if evidence.Release() != release || evidence.Report.RunnerAsOf == "" {
+			continue
+		}
+		if runnerAsOf == "" || evidence.ObservedAt.Before(earliest) {
+			runnerAsOf, earliest = evidence.Report.RunnerAsOf, evidence.ObservedAt
+		}
+	}
+	return runnerAsOf
 }
 
 func acceptedRelease(index Index, evidence compatibility.Evidence) error {
@@ -89,6 +94,13 @@ func validateEvidence(index Index, evidence compatibility.Evidence) error {
 }
 
 func (store EvidenceStore) write(evidence compatibility.Evidence, writes *mergeWrites) error {
+	data, err := json.MarshalIndent(evidence, "", "  ")
+	if err != nil {
+		return err
+	}
+	if len(data)+1 > maxRecordBytes {
+		return errors.New("serialized compatibility record exceeds 2 MiB")
+	}
 	name, err := evidenceName(evidence)
 	if err != nil {
 		return err
@@ -104,10 +116,6 @@ func (store EvidenceStore) write(evidence compatibility.Evidence, writes *mergeW
 	if err = os.Mkdir(dir, 0o755); err == nil {
 		writes.record(dir)
 	} else if !errors.Is(err, os.ErrExist) {
-		return err
-	}
-	data, err := json.MarshalIndent(evidence, "", "  ")
-	if err != nil {
 		return err
 	}
 	// Reuse the immutable, atomic record writer. An identical report is idempotent.

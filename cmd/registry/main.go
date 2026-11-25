@@ -30,7 +30,13 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: registry <candidate|admit|inspect|check|resolve|merge|export|status> [flags]")
+		return errors.New("usage: registry <candidate|admit|inspect|check|plan-compatibility|check-accepted|import-compatibility|resolve|merge|export|status> [flags]")
+	}
+	switch args[0] {
+	case "plan-compatibility", "check-accepted":
+		return runAcceptedCompatibility(ctx, args)
+	case "import-compatibility":
+		return importCompatibility(ctx, args[1:])
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	storePath := flags.String("store", "registry/plugins", "Read or write accepted plugin records in this directory.")

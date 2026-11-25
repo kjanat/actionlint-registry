@@ -53,7 +53,7 @@ jobs:
         if: steps.claim.outputs.claimed == 'true'
         run: |
           go build -o registry-cli ./cmd/registry
-          go -C adapters/actionlint build -trimpath -o ../../registry-checker .
+          CGO_ENABLED=0 go -C adapters/actionlint build -mod=readonly -trimpath -buildvcs=false -o ../../registry-checker .
       # Admission reads metadata without executing publisher code. This job has no repository write access.
       - name: Verify authenticated release
         id: admission
