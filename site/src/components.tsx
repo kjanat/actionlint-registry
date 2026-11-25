@@ -81,11 +81,12 @@ function Help({ root, observedAt }: { root: string; observedAt: string | null })
 }
 
 export function Layout(
-	{ root, title, children, observedAt }: {
+	{ root, title, children, observedAt, interactive }: {
 		root: string;
 		title: string;
 		children: ComponentChildren;
-		observedAt: string | null;
+		interactive: boolean;
+		observedAt?: string | null;
 	},
 ) {
 	return (
@@ -97,13 +98,13 @@ export function Layout(
 				<title>{title}</title>
 				<link rel='stylesheet' href={`${root}assets/site.css`} />
 				<link rel='icon' href={`${brand}actionlint-mark.svg`} type='image/svg+xml' />
-				<script type='module' src={`${root}assets/client.js`} />
+				{interactive && <script type='module' src={`${root}assets/client.js`} />}
 			</head>
 			<body>
 				<Header root={root} />
 				<main id='main' class='wrap' tabIndex={-1}>
 					{children}
-					<Help root={root} observedAt={observedAt} />
+					{observedAt !== undefined && <Help root={root} observedAt={observedAt} />}
 				</main>
 				<footer>
 					<div class='wrap'>
@@ -301,7 +302,7 @@ export function Directory({ root, plugins, state, onNavigate }: DirectoryProps) 
 
 export function Home({ root, data, state }: { root: string; data: SiteData; state: DirectoryState }) {
 	return (
-		<Layout root={root} title='Plugins for actionlint' observedAt={data.observedAt}>
+		<Layout interactive root={root} title='Plugins for actionlint' observedAt={data.observedAt}>
 			<h1 class='intro'>Plugins for actionlint</h1>
 			<div
 				id='directory'
@@ -316,10 +317,23 @@ export function Home({ root, data, state }: { root: string; data: SiteData; stat
 	);
 }
 
+export function NotFound() {
+	return (
+		<Layout interactive={false} root='/' title='404 | actionlint plugin registry'>
+			<section class='intro'>
+				<h1>Page not found</h1>
+				<p>
+					<a href='/'>Browse plugins</a>
+				</p>
+			</section>
+		</Layout>
+	);
+}
+
 export function PluginPage({ plugin, observedAt }: { plugin: Plugin; observedAt: string | null }) {
 	const root = '../../';
 	return (
-		<Layout root={root} title={`${plugin.name} | actionlint plugins`} observedAt={observedAt}>
+		<Layout interactive root={root} title={`${plugin.name} | actionlint plugins`} observedAt={observedAt}>
 			<p class='breadcrumb'>
 				<a href={`${root}index.html`}>All plugins</a> / {plugin.name}
 			</p>

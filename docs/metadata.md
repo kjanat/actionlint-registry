@@ -13,9 +13,11 @@ of the authenticated release repository. The version must match the release tag
 after removing at most one leading lowercase `v` from each. License information is
 a publisher declaration, not an independent license audit.
 
-The entire metadata object is retained, including unknown fields and numeric values.
-The registry reads discovery fields; it does not deserialize rule descriptors,
-configuration schemas, capabilities, or facts into a particular host's types.
+If your plugin accepts settings, put their JSON Schema in `config_schema`.
+For rule options, put `options_schema` on the rule in `rules[]` or `descriptor`.
+Each rule with options needs a non-empty `category` and `name`. Use a different
+pair for each rule. Write these schemas in Draft 2020-12 and keep any `$ref`
+targets inside the schema that uses them.
 
 ## Multiple plugins in one repository
 

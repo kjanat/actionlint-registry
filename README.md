@@ -269,6 +269,37 @@ configuration records the exact version and local candidates also bind a digest.
 Verified registry selections and artifact bytes live in the user cache. Disable a
 conflicting tool when replacing it, for example `--no-tool=shellcheck`.
 
+### Plugin configuration schemas
+
+After installing plugins, generate the editor schema from the project root.
+Use the same actionlint version and `--plugin` flags you use for linting.
+
+```sh
+actionlint config schema >.github/actionlint.local.schema.json
+```
+
+For Tombi, start `.github/actionlint.toml` with this line.
+
+```toml
+#:schema ./actionlint.local.schema.json
+```
+
+For the VS Code YAML extension, start `.github/actionlint.yaml` or
+`.github/actionlint.yml` with this line.
+
+```yaml
+# yaml-language-server: $schema=./actionlint.local.schema.json
+```
+
+Rerun the command when you update actionlint or change plugins.
+
+To look up one plugin's settings in the [schema index](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.schema.json),
+follow `$defs[plugin selector].$ref`, then `$defs[release tag].$ref`.
+The tag's index links to the plugin's settings at `$defs.config.$ref` and to
+individual rule options at `$defs.rules.$defs[category].$defs[rule name].$ref`.
+The [catalog](https://plugins.actionlint.kjanat.dev/schemas/plugin-config.catalog.json)
+lists a default URL only for plugins with an active version that has a schema.
+
 ### Registry schema
 
 Download the [registry schema bundle](https://plugins.actionlint.kjanat.dev/schemas/registry.schema.json)

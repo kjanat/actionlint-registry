@@ -25,9 +25,12 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with: { version-file: "${{ github.workspace }}/.golangci-lint-version", skip-cache: true }
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: kjanat/mise-action@ba8cdde9e7e3d26d190654d59b29bfeef2fb285c # v6
+        with: { install_args: "bun tombi", cache: false }
       - name: Install workspace dependencies
         run: bun install --frozen-lockfile
+      - name: Test editor schemas
+        run: scripts/test-editor-schema.sh
       - name: Check registry CLI types
         run: bun run typecheck
       - name: Test publisher and recovery commands
@@ -39,10 +42,20 @@ jobs:
           bun run --cwd site typecheck
           bun test --cwd site
           bun run --cwd site test:browser
-      - name: Build catalogue from exported registry JSON
+      - name: Rebuild catalogue
         run: |
+          input="$RUNNER_TEMP/registry-export"
+          go run ./cmd/registry export --store registry/plugins --output "$input"
+          bun site/cli.ts --input "$input" --output dist
           go run ./cmd/registry export --store registry/plugins --output dist
           bun site/cli.ts --input dist --output dist
+
+          # Recreate the layout of an export made before plugin settings schemas.
+          rm "$input/.registry-export-files.json" "$input/schemas/plugin-config.schema.json" "$input/schemas/plugin-config.catalog.json"
+          rm -rf "$input/schemas/plugin-config"
+          bun site/cli.ts --input "$input" --output "$input"
+          go run ./cmd/registry export --store registry/plugins --output "$input"
+          bun site/cli.ts --input "$input" --output "$input"
 
   adapter:
     runs-on: ubuntu-latest
@@ -99,14 +112,11 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with: { no-cache: true }
       - uses: kjanat/mise-action@ba8cdde9e7e3d26d190654d59b29bfeef2fb285c # v6
-        with: { version: 2026.11.14, install: false, cache: false }
-      - name: Install the ORAS version pinned in mise.toml
-        run: mise install oras
+        with: { install_args: oras, cache: false }
       - name: Package two-platform fixture images
         id: layout
         run: |
           bun install --frozen-lockfile
-          oras="$(mise which oras)"
           fixture="$PWD/adapters/actionlint/internal/validation/testdata/candidate.ts"
           dir="$RUNNER_TEMP/oci-candidate"
           layout="$dir/layout"
@@ -119,11 +129,11 @@ jobs:
               tag="$image-${platform//\//-}"
               mkdir -p "$dir/$tag"
               bun "$fixture" package --platform "$platform" --interface "$contract" --output "$dir/$tag/plugin.wasm"
-              (cd "$dir/$tag" && "$oras" push --oci-layout "$layout:$tag" --artifact-type application/vnd.actionlint.plugin.v1+json --artifact-platform "$platform" plugin.wasm:application/wasm)
+              (cd "$dir/$tag" && oras push --oci-layout "$layout:$tag" --artifact-type application/vnd.actionlint.plugin.v1+json --artifact-platform "$platform" plugin.wasm:application/wasm)
               tags+=("$tag")
             done
-            "$oras" manifest index create --oci-layout "$layout:$image" "${tags[@]}"
-            printf '%s=oci://ghcr.io/kjanat/actionlint-registry-fixture@%s\n' "$image" "$("$oras" resolve --oci-layout "$layout:$image")" >>"$GITHUB_OUTPUT"
+            oras manifest index create --oci-layout "$layout:$image" "${tags[@]}"
+            printf '%s=oci://ghcr.io/kjanat/actionlint-registry-fixture@%s\n' "$image" "$(oras resolve --oci-layout "$layout:$image")" >>"$GITHUB_OUTPUT"
           done
       - name: Exercise the shared candidate action on the two-platform image
         uses: ./check

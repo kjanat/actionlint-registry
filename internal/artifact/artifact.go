@@ -124,6 +124,11 @@ func declaration(kind string, data []byte, accepted bool) (Declaration, error) {
 	default:
 		return Declaration{}, errors.New("unsupported artifact format")
 	}
+	if !accepted {
+		if _, err := ConfigSettings(data); err != nil {
+			return Declaration{}, fmt.Errorf("plugin settings: %w", err)
+		}
+	}
 	return Declaration{Kind: kind, PluginID: m.ID, PluginVersion: m.PluginVersion, Repository: m.Repository, Contract: contract, Metadata: bytes.Clone(data)}, nil
 }
 

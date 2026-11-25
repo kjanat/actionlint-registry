@@ -14,6 +14,9 @@ plugins     = [
 excludes    = []
 extends     = "https://raw.githubusercontent.com/kjanat/kjanat/refs/heads/master/configs/dprint.remote.json"
 
+[toml]
+configFile = "https://raw.githubusercontent.com/kjanat/kjanat/refs/heads/master/configs/tombi.toml"
+
 [typescript]
 quoteStyle                              = "preferSingle"
 "module.sortImportDeclarations"         = "maintain"

@@ -1,4 +1,5 @@
 /** @jsxImportSource preact */
+import { Schema } from 'effect';
 import { render } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Directory } from '#components.tsx';
@@ -49,7 +50,7 @@ if (directory instanceof HTMLElement && directory.dataset.index && directory.dat
 	void fetch(endpoint).then(async response => {
 		if (!response.ok) throw new Error(`Search index HTTP ${response.status}`);
 		const data: unknown = await response.json();
-		const plugins = searchIndexSchema.parse(data);
+		const plugins = Schema.decodeUnknownSync(searchIndexSchema)(data);
 		directory.replaceChildren();
 		render(<BrowserDirectory plugins={plugins} base={base} />, directory);
 	}).catch(() => {

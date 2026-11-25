@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { Schema } from 'effect';
 import { mkdir, readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { chromium } from 'playwright';
@@ -32,14 +33,21 @@ test('static fallback, browser directory and locale behavior against 100 public 
 	if (reviewDirectory) await mkdir(reviewDirectory, { recursive: true });
 	const browser = await chromium.launch(process.env.SITE_CHROMIUM ? { executablePath: process.env.SITE_CHROMIUM } : {});
 	const base = 'https://registry.test/project/';
-	async function files(context: BrowserContext) {
-		await context.route(`${base}**`, async route => {
-			const path = new URL(route.request().url()).pathname.slice('/project/'.length) || 'index.html';
+	async function files(context: BrowserContext, root = base) {
+		await context.route(`${root}**`, async route => {
+			const path = new URL(route.request().url()).pathname.slice(new URL(root).pathname.length) || 'index.html';
 			if (path.split('/').includes('..')) throw new Error('Unexpected fixture traversal');
 			const extension = extname(path);
+			const body = await readFile(join(directory, path)).catch((error: unknown) => {
+				if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+				return null;
+			});
 			await route.fulfill({
-				body: await readFile(join(directory, path)),
-				contentType: extension === '.js'
+				status: body === null ? 404 : 200,
+				body: body ?? await readFile(join(directory, '404.html')),
+				contentType: body === null
+					? 'text/html'
+					: extension === '.js'
 					? 'text/javascript'
 					: extension === '.css'
 					? 'text/css'
@@ -50,6 +58,20 @@ test('static fallback, browser directory and locale behavior against 100 public 
 		});
 	}
 	try {
+		const notFound = await browser.newContext({ javaScriptEnabled: false });
+		const root = new URL('/', base).href;
+		await files(notFound, root);
+		const missing = await notFound.newPage();
+		const stylesheet = missing.waitForResponse(`${root}assets/site.css`);
+		const response = await missing.goto(`${root}plugins/missing/versions/missing.json`);
+		expect(response?.status()).toBe(404);
+		expect((await stylesheet).ok()).toBe(true);
+		expect(await missing.getByRole('heading', { name: 'Page not found', level: 1 }).isVisible()).toBe(true);
+		await missing.getByRole('link', { name: 'Browse plugins' }).click();
+		expect(missing.url()).toBe(root);
+		expect(await missing.getByRole('heading', { name: 'Plugins for actionlint', level: 1 }).isVisible()).toBe(true);
+		await notFound.close();
+
 		for (const [locale, timezoneId] of [['nl-NL', 'Europe/Amsterdam'], ['en-US', 'America/Los_Angeles']]) {
 			if (!locale || !timezoneId) throw new Error('Missing locale fixture');
 			for (const colorScheme of ['light', 'dark']) {
@@ -163,7 +185,7 @@ test('static fallback, browser directory and locale behavior against 100 public 
 			page.getByRole('link', { name: /^Publication record/ }).click(),
 		]);
 		if (!recordResponse) throw new Error('No publication JSON response');
-		expect(entrySchema.parse(await recordResponse.json()).submission.tag).toBe('v1.0.0');
+		expect(Schema.decodeUnknownSync(entrySchema)(await recordResponse.json()).submission.tag).toBe('v1.0.0');
 		for (const target of ['JSON index', 'Release statuses', 'Download counts JSON']) {
 			await page.goto(base);
 			if (target !== 'JSON index') await page.locator('.help summary').click();
@@ -173,9 +195,13 @@ test('static fallback, browser directory and locale behavior against 100 public 
 			]);
 			if (!response) throw new Error(`No response for ${target}`);
 			const payload: unknown = await response.json();
-			if (target === 'JSON index') expect(catalogueSchema.parse(payload).plugins).toHaveLength(100);
-			if (target === 'Release statuses') expect(statusSchema.parse(payload).releases).toHaveLength(0);
-			if (target === 'Download counts JSON') expect(downloadsSchema.parse(payload).releases).toHaveLength(100);
+			if (target === 'JSON index') expect(Schema.decodeUnknownSync(catalogueSchema)(payload).plugins).toHaveLength(100);
+			if (target === 'Release statuses') {
+				expect(Schema.decodeUnknownSync(statusSchema)(payload).releases).toHaveLength(0);
+			}
+			if (target === 'Download counts JSON') {
+				expect(Schema.decodeUnknownSync(downloadsSchema)(payload).releases).toHaveLength(100);
+			}
 		}
 		await context.close();
 

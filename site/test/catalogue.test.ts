@@ -1,11 +1,29 @@
+import { Schema } from 'effect';
 import { describe, expect, test } from 'bun:test';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { buildSite } from '#build.tsx';
 import { loadCatalogue } from '#catalogue.ts';
 import { downloadsSchema } from '#schema.ts';
 import { createExport, fixture } from '#test/fixtures.ts';
 
 describe('public registry JSON projection', () => {
+	test('renders a historical record with a numeric description', async () => {
+		const dir = await createExport([fixture('Historical plugin')]);
+		const key = '1'.padStart(64, '0');
+		const path = `plugins/${key}/versions/${key}.json`;
+		const { artifact, record_version, ...record } = await Bun.file(join(dir, path)).json();
+		const metadata = { name: 'Historical plugin', description: 7, config_schema: { type: 'boolean' } };
+		await writeFile(join(dir, path), JSON.stringify({ ...record, validation: { ...artifact, metadata } }));
+
+		const site = join(dir, 'website');
+		expect(await buildSite(dir, site)).toBe(1);
+		const [plugin] = await Bun.file(join(site, 'assets/search-index.json')).json();
+		expect(plugin).toMatchObject({ name: 'Historical plugin', description: '' });
+		expect(await Bun.file(join(site, plugin.path)).text()).toContain('Historical plugin');
+		expect((await Bun.file(join(site, path)).json()).validation.metadata).toEqual(metadata);
+	});
+
 	test('monorepo packages keep their selectors and release statuses distinct', async () => {
 		const version = { version: 'v1.0.0', publishedAt: '2026-01-01T00:00:00Z', count: 2 };
 		const directory = await createExport([{
@@ -103,15 +121,18 @@ describe('public registry JSON projection', () => {
 		'rejects a count from a different %s',
 		async field => {
 			const directory = await createExport([fixture('Plugin')]);
-			const snapshot = downloadsSchema.parse(JSON.parse(await readFile(join(directory, 'downloads.json'), 'utf8')));
-			const observation = snapshot.releases[0];
-			if (!observation) throw new Error('Missing fixture observation');
+			const snapshot = Schema.decodeUnknownSync(downloadsSchema)(
+				JSON.parse(await readFile(join(directory, 'downloads.json'), 'utf8')),
+			);
+			const original = snapshot.releases[0];
+			if (!original) throw new Error('Missing fixture observation');
+			const observation = { ...original };
 			if (field === 'provider') observation.provider = 'gitlab';
 			if (field === 'repository_id') observation.repository_id++;
 			if (field === 'version') observation.version = 'other';
 			if (field === 'asset_id') observation.asset_id++;
 			if (field === 'sha256') observation.sha256 = 'f'.repeat(64);
-			await writeFile(join(directory, 'downloads.json'), JSON.stringify(snapshot));
+			await writeFile(join(directory, 'downloads.json'), JSON.stringify({ ...snapshot, releases: [observation] }));
 			expect((await loadCatalogue(directory)).plugins[0]?.downloads).toEqual({ state: 'unavailable' });
 		},
 	);

@@ -1,3 +1,4 @@
+import { Schema } from 'effect';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { catalogueSchema, downloadsSchema, entrySchema, manifestSchema, statusSchema } from '#schema.ts';
@@ -23,8 +24,8 @@ function releaseSource(entry: Entry): Release['source'] {
 	return { type: 'oci', reference: submission.artifact.reference };
 }
 
-async function readJSON(path: string): Promise<unknown> {
-	return JSON.parse(await readFile(path, 'utf8'));
+async function readJSON<S extends Schema.ConstraintDecoder<unknown>>(path: string, schema: S): Promise<S['Type']> {
+	return Schema.decodeUnknownSync(Schema.fromJsonString(schema))(await readFile(path, 'utf8'));
 }
 
 function releaseMetric(entry: Entry, downloads: DownloadSnapshot | null): Metric {
@@ -52,7 +53,7 @@ function totalMetric(releases: Release[]): Metric {
 	return { state: 'available', count: total };
 }
 
-function statusFor(entry: Entry, name: string, statuses: ReleaseStatus[]): ReleaseStatus | undefined {
+function statusFor(entry: Entry, name: string, statuses: readonly ReleaseStatus[]): ReleaseStatus | undefined {
 	return statuses.find(item => item.status === 'revoked' && item.sha256 === submissionDigest(entry))
 		?? statuses.findLast(item =>
 			item.name === name
@@ -61,16 +62,16 @@ function statusFor(entry: Entry, name: string, statuses: ReleaseStatus[]): Relea
 }
 
 export async function loadCatalogue(directory: string): Promise<SiteData> {
-	const catalogue = catalogueSchema.parse(await readJSON(join(directory, 'index.json')));
-	const statuses = statusSchema.parse(await readJSON(join(directory, catalogue.statuses ?? 'statuses.json')));
+	const catalogue = await readJSON(join(directory, 'index.json'), catalogueSchema);
+	const statuses = await readJSON(join(directory, catalogue.statuses ?? 'statuses.json'), statusSchema);
 	let downloads: DownloadSnapshot | null = null;
 	try {
-		downloads = downloadsSchema.parse(await readJSON(join(directory, 'downloads.json')));
+		downloads = await readJSON(join(directory, 'downloads.json'), downloadsSchema);
 	} catch (error) {
 		if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
 	}
 	const plugins = await Promise.all(catalogue.plugins.map(async item => {
-		const manifest = manifestSchema.parse(await readJSON(join(directory, item.manifest)));
+		const manifest = await readJSON(join(directory, item.manifest), manifestSchema);
 		const repository = `${manifest.plugin.provider}.com/${manifest.plugin.repository}`;
 		let selector = repository;
 		if (manifest.plugin.schema_version === 2) {
@@ -95,7 +96,7 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 		const reference = item.aliases.toSorted()[0] ?? item.name;
 		const entries = await Promise.all(manifest.versions.map(async version => {
 			const record = join(dirname(item.manifest), version.record).replaceAll('\\', '/');
-			const entry = entrySchema.parse(await readJSON(join(directory, record)));
+			const entry = await readJSON(join(directory, record), entrySchema);
 			if (
 				entry.submission.tag !== version.version
 				|| `${entry.submission.provider}.com/${entry.submission.repository}` !== repository
@@ -133,7 +134,7 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 		if (!newest) throw new Error(`No releases for ${item.name}`);
 		const declared = newest.entry.artifact?.metadata ?? newest.entry.validation?.metadata;
 		const releases = entries.map(entry => entry.release);
-		const plugin: Plugin = {
+		return {
 			name: declared?.name || reference,
 			description: declared?.description ?? '',
 			license: declared?.license ?? '',
@@ -145,8 +146,10 @@ export async function loadCatalogue(directory: string): Promise<SiteData> {
 			updatedAt: newest.release.publishedAt,
 			downloads: totalMetric(releases),
 			releases,
-		};
-		return plugin;
+		} satisfies Plugin;
 	}));
-	return { plugins, observedAt: downloads?.observed_at ?? null };
+	return {
+		plugins,
+		observedAt: downloads?.observed_at ?? null,
+	};
 }

@@ -15,9 +15,9 @@
   },
   "dependencies": {
     "@kjanat/dreamcli": "catalog:",
+    "effect": "catalog:site",
     "preact": "catalog:site",
-    "preact-render-to-string": "catalog:site",
-    "zod": "catalog:site"
+    "preact-render-to-string": "catalog:site"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
