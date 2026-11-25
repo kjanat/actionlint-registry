@@ -36,7 +36,7 @@ func run(ctx context.Context, args []string) error {
 	case "plan-compatibility", "check-accepted":
 		return runAcceptedCompatibility(ctx, args)
 	case "import-compatibility":
-		return importCompatibility(args[1:])
+		return importCompatibility(ctx, args[1:])
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	storePath := flags.String("store", "registry/plugins", "Read or write accepted plugin records in this directory.")

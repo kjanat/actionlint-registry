@@ -183,6 +183,7 @@ jobs:
         with:
           artifact-ids: ${{ needs.plan.outputs.plan }}
           path: ${{ runner.temp }}/selection
+      # The publisher checks current release status and verifies historical OCI layers from the pinned manifests.
       - name: Import reports
         id: import
         env:

@@ -2,7 +2,10 @@ package registry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,12 +24,17 @@ func importPlan(entries ...Entry) CompatibilityPlan {
 	return plan
 }
 
+func testPublication(plan CompatibilityPlan) CompatibilityImport {
+	return CompatibilityImport{CheckerSHA256: plan.CheckerSHA256, HostRevision: plan.HostRevision, Warnings: io.Discard}
+}
+
 func importObservation(entry Entry, outcome string) compatibility.Evidence {
 	plan := importPlan(entry)
 	e := observation(entry, outcome)
 	e.Report.SchemaVersion = compatibility.ProtocolVersion
 	e.Report.Host = compatibility.Host{Name: "actionlint", Revision: plan.HostRevision}
 	e.Report.Policy = "actionlint-smoke/1"
+	e.ObservedAt = time.Date(2025, 1, 2, 12, 0, 0, 0, time.UTC)
 	e.Report.RunnerAsOf = e.ObservedAt.Format(time.DateOnly)
 	e.CheckerSHA256 = plan.CheckerSHA256
 	return e
@@ -45,7 +53,7 @@ func TestImportKeepsCompletedChecksWhenAnotherArtifactIsUnavailable(t *testing.T
 		t.Run(outcome, func(t *testing.T) {
 			store := EvidenceStore{Directory: t.TempDir()}
 			e := importObservation(entry, outcome)
-			e.ObservedAt = time.Now().UTC().Truncate(24 * time.Hour).Add(-time.Second)
+			e.ObservedAt = e.ObservedAt.Truncate(24 * time.Hour).Add(-time.Second)
 			e.Report.RunnerAsOf = e.ObservedAt.Format(time.DateOnly)
 			path := filepath.Join(dir, entry.Submission.Digest()+".json")
 			for i := range 2 {
@@ -57,7 +65,7 @@ func TestImportKeepsCompletedChecksWhenAnotherArtifactIsUnavailable(t *testing.T
 				if err := WriteJSON(path, []compatibility.Evidence{e}); err != nil {
 					t.Fatal(err)
 				}
-				if err := store.ImportCompatibility(index, plan, dir, plan.CheckerSHA256, plan.HostRevision); err != nil {
+				if err := store.ImportCompatibility(t.Context(), index, plan, dir, testPublication(plan)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -69,7 +77,7 @@ func TestImportKeepsCompletedChecksWhenAnotherArtifactIsUnavailable(t *testing.T
 			if err := WriteJSON(path, []compatibility.Evidence{e}); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.ImportCompatibility(index, plan, dir, plan.CheckerSHA256, plan.HostRevision); err == nil {
+			if err := store.ImportCompatibility(t.Context(), index, plan, dir, testPublication(plan)); err == nil {
 				t.Fatal("skipped validation of an invalid duplicate")
 			}
 		})
@@ -112,7 +120,7 @@ func TestImportRejectsFilesOutsideThePlan(t *testing.T) {
 				}
 			}
 			store := EvidenceStore{Directory: t.TempDir()}
-			if err := store.ImportCompatibility(index, plan, dir, plan.CheckerSHA256, plan.HostRevision); err == nil {
+			if err := store.ImportCompatibility(t.Context(), index, plan, dir, testPublication(plan)); err == nil {
 				t.Fatalf("import accepted %s", mode)
 			}
 		})
@@ -149,7 +157,7 @@ func TestInvalidReportRollsBackEarlierTargets(t *testing.T) {
 			if err := WriteJSON(filepath.Join(dir, next.Submission.Digest()+".json"), []compatibility.Evidence{e}); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.ImportCompatibility(index, plan, dir, plan.CheckerSHA256, plan.HostRevision); err == nil {
+			if err := store.ImportCompatibility(t.Context(), index, plan, dir, testPublication(plan)); err == nil {
 				t.Fatalf("accepted another %s", field)
 			}
 			if stored, err := store.Load(index); err != nil || len(stored) != 0 {
@@ -175,6 +183,8 @@ func TestImportRequiresTheExactOCIPrimaryLayers(t *testing.T) {
 			plan.Targets[0].PrimaryLayers = e.OCIPrimaryLayers
 			e.OCIPrimaryLayers = nil
 		}
+		publication := testPublication(plan)
+		publication.PrimaryLayerDigests = func(context.Context, string) ([]string, error) { return entry.OCIPrimaryLayers, nil }
 		index := Index{Entries: []Entry{e}}
 		dir := t.TempDir()
 		path := filepath.Join(dir, entry.Submission.Digest()+".json")
@@ -190,14 +200,14 @@ func TestImportRequiresTheExactOCIPrimaryLayers(t *testing.T) {
 			if err := WriteJSON(path, wrong); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.ImportCompatibility(index, plan, dir, plan.CheckerSHA256, plan.HostRevision); err == nil {
+			if err := store.ImportCompatibility(t.Context(), index, plan, dir, publication); err == nil {
 				t.Fatalf("accepted incomplete or extra OCI reports (legacy %t)", legacy)
 			}
 		}
 		if err := WriteJSON(path, reports); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.ImportCompatibility(index, plan, dir, plan.CheckerSHA256, plan.HostRevision); err != nil {
+		if err := store.ImportCompatibility(t.Context(), index, plan, dir, publication); err != nil {
 			t.Fatal(err)
 		}
 		if found, err := store.Load(index); err != nil || len(found) != 2 || !slices.ContainsFunc(found, func(e compatibility.Evidence) bool { return e.ObservedAt.Equal(first.ObservedAt) }) {
@@ -238,7 +248,7 @@ func TestImportBindsPlanToPublisherPinsAndAcceptedRelease(t *testing.T) {
 			}
 			store := EvidenceStore{Directory: t.TempDir()}
 			index := Index{Entries: []Entry{release}}
-			if err := store.ImportCompatibility(index, plan, results, checker, host); err == nil {
+			if err := store.ImportCompatibility(t.Context(), index, plan, results, CompatibilityImport{CheckerSHA256: checker, HostRevision: host, Warnings: io.Discard}); err == nil {
 				t.Fatalf("accepted a plan with a mismatched %s", field)
 			}
 		})
@@ -263,10 +273,163 @@ func TestImportRejectsReportsTooLargeToReadBack(t *testing.T) {
 	}
 	store := EvidenceStore{Directory: t.TempDir()}
 	index := Index{Entries: []Entry{entry}}
-	if err := store.ImportCompatibility(index, plan, dir, plan.CheckerSHA256, plan.HostRevision); err == nil || !strings.Contains(err.Error(), "serialized compatibility record") {
+	if err := store.ImportCompatibility(t.Context(), index, plan, dir, testPublication(plan)); err == nil || !strings.Contains(err.Error(), "serialized compatibility record") {
 		t.Fatalf("unexpected import result: %v", err)
 	}
 	if stored, err := store.Load(index); err != nil || len(stored) != 0 {
 		t.Fatalf("unreadable observation left in store: %v, %v", stored, err)
+	}
+}
+
+func TestImportSkipsReleasesThatBecameIneligible(t *testing.T) {
+	original := acceptedFixture(t)
+	active := changedArtifactFixture(t, original, "v2.0.0", "core", "example.wasm")
+	for _, reason := range []string{"withdrawn tag", "revoked release", "revoked OCI layer", "revoked historical OCI layer"} {
+		t.Run(reason, func(t *testing.T) {
+			stale := original
+			if strings.Contains(reason, "OCI") {
+				stale = ociCandidate(t)
+			}
+			plan := importPlan(active, stale)
+			status := statusFixture(stale, StatusRevoked)
+			status.SHA256 = stale.Submission.Digest()
+			switch reason {
+			case "withdrawn tag":
+				status.Status = StatusWithdrawn
+			case "revoked OCI layer", "revoked historical OCI layer":
+				// Revoking another release's bytes also blocks their use as a layer.
+				status.Name, status.Version, status.SHA256 = "github.com/another/plugin", "v3", stale.OCIPrimaryLayers[0]
+				if reason == "revoked historical OCI layer" {
+					plan.Targets[1].PrimaryLayers, stale.OCIPrimaryLayers = stale.OCIPrimaryLayers, nil
+				}
+			}
+			publication := testPublication(plan)
+			publication.Statuses = []ReleaseStatus{status}
+			store := EvidenceStore{Directory: t.TempDir()}
+			index := Index{Entries: []Entry{active, stale}}
+			dir := t.TempDir()
+			if err := WriteJSON(filepath.Join(dir, active.Submission.Digest()+".json"), []compatibility.Evidence{importObservation(active, "passed")}); err != nil {
+				t.Fatal(err)
+			}
+			// Even an ineligible target must have exactly one correctly named result file.
+			wrongName := filepath.Join(dir, "extra.json")
+			if err := os.WriteFile(wrongName, []byte("unused result"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.ImportCompatibility(t.Context(), index, plan, dir, publication); err == nil {
+				t.Fatal("accepted an unexpected filename in place of the skipped target")
+			}
+			if err := os.Rename(wrongName, filepath.Join(dir, stale.Submission.Digest()+".json")); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.ImportCompatibility(t.Context(), index, plan, dir, publication); err != nil {
+				t.Fatal(err)
+			}
+			found, err := store.Load(index)
+			if err != nil || len(found) != 1 || found[0].Release() != active.Submission.Digest() {
+				t.Fatalf("stored observations: %v, %v", found, err)
+			}
+		})
+	}
+}
+
+func TestImportDefersStaleAssessmentDateWithoutLosingOtherTargets(t *testing.T) {
+	first := acceptedFixture(t)
+	next := changedArtifactFixture(t, first, "v2.0.0", "core", "example.wasm")
+	index := Index{Entries: []Entry{first, next}}
+	plan := importPlan(first, next)
+	store := EvidenceStore{Directory: t.TempDir()}
+	dir := t.TempDir()
+	for _, entry := range index.Entries {
+		if err := WriteJSON(filepath.Join(dir, entry.Submission.Digest()+".json"), []compatibility.Evidence{importObservation(entry, "passed")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Another checker established this release's baseline after the batch was planned.
+	prior := importObservation(first, "passed")
+	prior.CheckerSHA256 = strings.Repeat("c", 64)
+	prior.Report.RunnerAsOf = "2025-01-01"
+	if err := store.Add(index, prior); err != nil {
+		t.Fatal(err)
+	}
+	var warnings bytes.Buffer
+	publication := testPublication(plan)
+	publication.Warnings = &warnings
+	if err := store.ImportCompatibility(t.Context(), index, plan, dir, publication); err != nil {
+		t.Fatal(err)
+	}
+	found, err := store.Load(index)
+	if err != nil || len(found) != 2 {
+		t.Fatalf("stored observations: %v, %v", found, err)
+	}
+	covered := coveredArtifacts(found, plan.CheckerSHA256, plan.HostRevision)
+	if len(covered) != 1 || !covered[artifactBinding{next.Submission.Digest(), next.Submission.Digest()}] || !strings.Contains(warnings.String(), first.Name()+"@"+first.Submission.Tag) {
+		t.Fatalf("coverage = %v, warnings = %s", covered, &warnings)
+	}
+}
+
+func TestImportRechecksHistoricalOCIInventory(t *testing.T) {
+	legacy := ociCandidate(t)
+	layer := legacy.OCIPrimaryLayers[0]
+	legacy.OCIPrimaryLayers = nil
+	asset := changedArtifactFixture(t, acceptedFixture(t), "v2.0.0", "core", "example.wasm")
+	index := Index{Entries: []Entry{asset, legacy}}
+	plan := importPlan(asset, legacy)
+	plan.Targets[1].PrimaryLayers = []string{layer}
+	dir := t.TempDir()
+	if err := WriteJSON(filepath.Join(dir, asset.Submission.Digest()+".json"), []compatibility.Evidence{importObservation(asset, "passed")}); err != nil {
+		t.Fatal(err)
+	}
+	e := importObservation(legacy, "unsupported")
+	e.ReleaseSHA256, e.Report.ArtifactSHA256 = legacy.Submission.Digest(), layer
+	if err := WriteJSON(filepath.Join(dir, e.Release()+".json"), []compatibility.Evidence{e}); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"unavailable", "invalid graph", "unexpected layer", "missing layer", "already published subset"} {
+		t.Run(mode, func(t *testing.T) {
+			store := EvidenceStore{Directory: t.TempDir()}
+			if mode == "already published subset" {
+				if err := store.Add(index, e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var warnings bytes.Buffer
+			publication := testPublication(plan)
+			publication.Warnings = &warnings
+			publication.PrimaryLayerDigests = func(ctx context.Context, ref string) ([]string, error) {
+				if _, ok := ctx.Deadline(); !ok || ref != legacy.Submission.Artifact.Reference() {
+					t.Fatalf("incorrect lookup: %s (deadline: %t)", ref, ok)
+				}
+				switch mode {
+				case "unavailable":
+					return nil, errors.New("registry unavailable")
+				case "invalid graph":
+					return nil, reject("manifest content does not match its digest")
+				case "unexpected layer", "already published subset":
+					return []string{layer, strings.Repeat("f", 64)}, nil
+				default:
+					return []string{}, nil
+				}
+			}
+			err := store.ImportCompatibility(t.Context(), index, plan, dir, publication)
+			if (err == nil) != (mode == "unavailable") {
+				t.Fatalf("%s: import returned %v", mode, err)
+			}
+			found, err := store.Load(index)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "unavailable" {
+				if len(found) != 1 || found[0].Release() != asset.Submission.Digest() || !strings.Contains(warnings.String(), "registry unavailable") {
+					t.Fatalf("wrong partial import: %v; %s", found, &warnings)
+				}
+			} else if mode == "already published subset" {
+				if len(found) != 1 || found[0].Release() != e.Release() {
+					t.Fatalf("rejected partial inventory changed previously published evidence: %v", found)
+				}
+			} else if len(found) != 0 {
+				t.Fatalf("import wrote evidence for an invalid handoff: %v", found)
+			}
+		})
 	}
 }

@@ -100,6 +100,33 @@ func TestOCIProcessRootDigestAndVariants(t *testing.T) {
 	}
 }
 
+func TestPrimaryLayerDigestsReadOnlyPinnedManifests(t *testing.T) {
+	first := processBody()
+	second := append(bytes.Clone(first), '\n')
+	inspector, reference, objects := ociFixture(t, first, second, first)
+	for path := range objects {
+		if strings.Contains(path, "/blobs/") {
+			delete(objects, path)
+		}
+	}
+	want := []string{key(string(first)), key(string(second))}
+	slices.Sort(want)
+	got, err := inspector.PrimaryLayerDigests(t.Context(), reference)
+	if err != nil || !slices.Equal(want, got) {
+		t.Fatalf("inventory = %v, %v; want %v", got, err, want)
+	}
+
+	for path, data := range objects {
+		if !strings.HasSuffix(reference, filepath.Base(path)) {
+			objects[path] = append(bytes.Clone(data), ' ')
+			break
+		}
+	}
+	if got, err := inspector.PrimaryLayerDigests(t.Context(), reference); err == nil || len(got) != 0 {
+		t.Fatalf("inventory from a modified child manifest = %v, %v", got, err)
+	}
+}
+
 func TestOCIAnonymousAuthenticationAndRedirectPolicy(t *testing.T) {
 	requests := 0
 	inspector := &OCIInspector{client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

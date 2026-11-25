@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"registry.actionlint.kjanat.dev/internal/artifact"
 	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
 
@@ -100,7 +99,7 @@ func TestCheckAcceptedVerifiedProcessAssetsAndOCI(t *testing.T) {
 				entry.OCIPrimaryLayers = nil
 			}
 			index := Index{Entries: []Entry{entry}}
-			plan, err := PlanCompatibility(t.Context(), index, nil, nil, checksum, batchTestRevision, 1, 0, inspector.Walk, io.Discard)
+			plan, err := PlanCompatibility(t.Context(), index, nil, nil, checksum, batchTestRevision, 1, 0, inspector.PrimaryLayerDigests, io.Discard)
 			if err != nil || len(plan.Targets) != 1 {
 				t.Fatalf("plan: %+v: %v", plan, err)
 			}
@@ -125,7 +124,7 @@ func TestCheckAcceptedVerifiedProcessAssetsAndOCI(t *testing.T) {
 			if kind == "historical OCI" {
 				legacyReports = reports
 			}
-			plan, err = PlanCompatibility(t.Context(), index, nil, reports, checksum, batchTestRevision, 1, 0, inspector.Walk, io.Discard)
+			plan, err = PlanCompatibility(t.Context(), index, nil, reports, checksum, batchTestRevision, 1, 0, inspector.PrimaryLayerDigests, io.Discard)
 			if err != nil || len(plan.Targets) != 0 {
 				t.Fatalf("complete observation queued again: %+v, %v", plan, err)
 			}
@@ -135,8 +134,8 @@ func TestCheckAcceptedVerifiedProcessAssetsAndOCI(t *testing.T) {
 	legacy.OCIPrimaryLayers = nil
 	index := Index{Entries: []Entry{legacy, plain}}
 	var warnings bytes.Buffer
-	unavailable := func(context.Context, string, OCILayer) (artifact.Declaration, error) {
-		return artifact.Declaration{}, errors.New("offline")
+	unavailable := func(context.Context, string) ([]string, error) {
+		return nil, errors.New("offline")
 	}
 	plan, err := PlanCompatibility(t.Context(), index, nil, legacyReports, checksum, batchTestRevision, 2, 0, unavailable, &warnings)
 	if err != nil || len(plan.Targets) != 1 || plan.Targets[0].SHA256 != plain.Submission.Digest() || len(plan.Unavailable) != 1 || plan.Unavailable[0].SHA256 != legacy.Submission.Digest() || !strings.Contains(warnings.String(), "offline") {
@@ -204,5 +203,53 @@ func TestCompatibilityPlanRequiresAllOCILayersAndSkipsRevokedBytes(t *testing.T)
 	plan, err = PlanCompatibility(t.Context(), index, statuses, prior, report.CheckerSHA256, batchTestRevision, 1, 0, nil, io.Discard)
 	if err != nil || len(plan.Targets) != 0 {
 		t.Fatalf("scheduled revoked layer: %+v, %v", plan, err)
+	}
+}
+
+func TestPlanFillsSlotAfterCoveredLegacyOCIAndRotatesWalks(t *testing.T) {
+	first := ociCandidate(t)
+	layer := first.OCIPrimaryLayers[0]
+	first.OCIPrimaryLayers = nil
+	first.Submission.Tag = "v1"
+	second := first
+	second.Submission.Tag = "v2"
+	var err error
+	second.Submission.Artifact, err = OCIReference("oci://ghcr.io/example/plugin@sha256:" + key("second release"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset := acceptedFixture(t)
+	asset.Submission.Tag = "v3"
+	index := Index{Entries: []Entry{second, asset, first}}
+
+	report := layerObservation(first, layer)
+	report.Report.Host = compatibility.Host{Name: "actionlint", Revision: batchTestRevision}
+	report.Report.Policy = "actionlint-smoke/1"
+	report.Report.SchemaVersion = compatibility.ProtocolVersion
+	report.Report.RunnerAsOf = "2026-10-01"
+	for _, tc := range []struct {
+		offset            int
+		visited, selected Entry
+	}{
+		{0, first, asset},
+		{1, second, second},
+	} {
+		t.Run(tc.selected.Submission.Tag, func(t *testing.T) {
+			var visits []string
+			walk := func(_ context.Context, reference string) ([]string, error) {
+				visits = append(visits, reference)
+				return []string{layer}, nil
+			}
+			plan, err := PlanCompatibility(t.Context(), index, nil, []compatibility.Evidence{report}, report.CheckerSHA256, batchTestRevision, 1, tc.offset, walk, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(visits, []string{tc.visited.Submission.Artifact.Reference()}) {
+				t.Fatalf("unexpected inventory walks: %v", visits)
+			}
+			if len(plan.Targets) != 1 || plan.Targets[0].SHA256 != tc.selected.Submission.Digest() {
+				t.Fatalf("planned %v, want %s", plan.Targets, tc.selected.Submission.Tag)
+			}
+		})
 	}
 }

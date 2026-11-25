@@ -48,7 +48,7 @@ func runAcceptedCompatibility(ctx context.Context, args []string) error {
 		return err
 	}
 	if args[0] == "plan-compatibility" {
-		plan, err := registry.PlanCompatibility(ctx, index, statuses, prior, *checksum, *host, limit, offset, registry.NewOCIInspector().Walk, os.Stderr)
+		plan, err := registry.PlanCompatibility(ctx, index, statuses, prior, *checksum, *host, limit, offset, registry.NewOCIInspector().PrimaryLayerDigests, os.Stderr)
 		if err != nil {
 			return err
 		}

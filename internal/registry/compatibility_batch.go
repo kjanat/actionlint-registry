@@ -69,7 +69,7 @@ func (plan CompatibilityPlan) Validate() error {
 	return nil
 }
 
-func PlanCompatibility(ctx context.Context, index Index, statuses []ReleaseStatus, stored []compatibility.Evidence, checkerSHA256, hostRevision string, limit, offset int, walk OCIWalker, warnings io.Writer) (CompatibilityPlan, error) {
+func PlanCompatibility(ctx context.Context, index Index, statuses []ReleaseStatus, stored []compatibility.Evidence, checkerSHA256, hostRevision string, limit, offset int, primaryLayers func(context.Context, string) ([]string, error), warnings io.Writer) (CompatibilityPlan, error) {
 	plan := CompatibilityPlan{SchemaVersion: 1, CheckerSHA256: checkerSHA256, HostRevision: hostRevision, Targets: []CompatibilityTarget{}}
 	if err := plan.Validate(); err != nil {
 		return plan, err
@@ -116,32 +116,32 @@ func PlanCompatibility(ctx context.Context, index Index, statuses []ReleaseStatu
 	offset %= len(missing)
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	for i := range min(limit, len(missing)) {
+	walksLeft := limit
+	for i := range len(missing) {
+		if len(plan.Targets)+len(plan.Unavailable) == limit {
+			break
+		}
 		entry := missing[(offset+i)%len(missing)]
 		target := CompatibilityTarget{Plugin: entry.Name(), Version: entry.Submission.Tag, SHA256: entry.Submission.Digest()}
 		if entry.Submission.IsOCI() && len(entry.OCIPrimaryLayers) == 0 {
+			if walksLeft == 0 {
+				continue
+			}
+			walksLeft--
 			reference := entry.Submission.Artifact.Reference()
 			// These older records omit the layer list. Recover it from the digest-pinned graph.
-			_, err := walk(ctx, reference, func(digest, _ string, _ []byte) error {
-				target.PrimaryLayers = append(target.PrimaryLayers, strings.TrimPrefix(digest, "sha256:"))
-				return nil
-			})
+			layers, err := primaryLayers(ctx, reference)
 			if err != nil {
-				target.PrimaryLayers = nil
 				plan.Unavailable = append(plan.Unavailable, target)
 				if _, warnErr := fmt.Fprintf(warnings, "Cannot plan %s@%s: %v\n", target.Plugin, target.Version, err); warnErr != nil {
 					return plan, warnErr
 				}
 				continue
 			}
-			slices.Sort(target.PrimaryLayers)
-			target.PrimaryLayers = slices.Compact(target.PrimaryLayers)
-			if len(target.PrimaryLayers) == 0 {
-				return plan, fmt.Errorf("no primary layers in %s", reference)
-			}
-			if coveredLayers(target.SHA256, target.PrimaryLayers) || containsRevokedLayer(target.PrimaryLayers, statuses) {
+			if coveredLayers(target.SHA256, layers) || containsRevokedLayer(layers, statuses) {
 				continue
 			}
+			target.PrimaryLayers = layers
 		}
 		plan.Targets = append(plan.Targets, target)
 	}

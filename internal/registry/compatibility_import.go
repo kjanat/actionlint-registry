@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"registry.actionlint.kjanat.dev/internal/compatibility"
 )
@@ -38,13 +40,21 @@ func coveredArtifacts(stored []compatibility.Evidence, checkerSHA256, hostRevisi
 	return covered
 }
 
+type CompatibilityImport struct {
+	CheckerSHA256       string
+	HostRevision        string
+	Statuses            []ReleaseStatus
+	PrimaryLayerDigests func(context.Context, string) ([]string, error)
+	Warnings            io.Writer
+}
+
 // ImportCompatibility reads one report array or empty .unavailable file per
 // planned release. Only the publisher chooses the checker, host and destination.
-func (store EvidenceStore) ImportCompatibility(index Index, plan CompatibilityPlan, directory, checkerSHA256, hostRevision string) (err error) {
+func (store EvidenceStore) ImportCompatibility(ctx context.Context, index Index, plan CompatibilityPlan, directory string, publication CompatibilityImport) (err error) {
 	if err := plan.Validate(); err != nil {
 		return err
 	}
-	if plan.CheckerSHA256 != checkerSHA256 || plan.HostRevision != hostRevision {
+	if plan.CheckerSHA256 != publication.CheckerSHA256 || plan.HostRevision != publication.HostRevision {
 		return errors.New("compatibility plan differs from the pinned checker or host")
 	}
 	files, err := compatibilityResultFiles(directory, len(plan.Targets))
@@ -55,7 +65,9 @@ func (store EvidenceStore) ImportCompatibility(index Index, plan CompatibilityPl
 	if err != nil {
 		return err
 	}
-	covered := coveredArtifacts(stored, checkerSHA256, hostRevision)
+	covered := coveredArtifacts(stored, publication.CheckerSHA256, publication.HostRevision)
+	lookup, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
 	var writes mergeWrites
 	defer func() {
 		if err != nil {
@@ -63,7 +75,14 @@ func (store EvidenceStore) ImportCompatibility(index Index, plan CompatibilityPl
 		}
 	}()
 	for _, target := range plan.Targets {
-		layers, err := target.expectedArtifacts(index)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		entry, err := Find(index, target.Plugin, target.Version)
+		if err != nil {
+			return err
+		}
+		layers, err := target.expectedArtifacts(entry)
 		if err != nil {
 			return err
 		}
@@ -75,14 +94,10 @@ func (store EvidenceStore) ImportCompatibility(index Index, plan CompatibilityPl
 		if !ok {
 			return fmt.Errorf("missing report or empty .unavailable file for %s@%s", target.Plugin, target.Version)
 		}
-		asOf := ""
-		for _, layer := range layers {
-			if !covered[artifactBinding{target.SHA256, layer}] {
-				asOf = releaseRunnerAsOf(stored, target.SHA256)
-				break
-			}
+		if !eligibleCompatibility(entry, publication.Statuses) || containsRevokedLayer(target.PrimaryLayers, publication.Statuses) {
+			continue
 		}
-		observations, err := readReleaseReports(filepath.Join(directory, name), f.Size(), layers, target, plan, asOf)
+		observations, err := readReleaseReports(filepath.Join(directory, name), f.Size(), layers, target, plan)
 		if err != nil {
 			return fmt.Errorf("%s@%s: %w", target.Plugin, target.Version, err)
 		}
@@ -90,22 +105,47 @@ func (store EvidenceStore) ImportCompatibility(index Index, plan CompatibilityPl
 			if err := validateEvidence(index, e); err != nil {
 				return err
 			}
-			// A different run can finish the same release between planning and publication.
-			if !covered[artifactBinding{e.Release(), e.Report.ArtifactSHA256}] {
-				if err := store.write(e, &writes); err != nil {
-					return err
+		}
+		if entry.Submission.IsOCI() && len(entry.OCIPrimaryLayers) == 0 {
+			// Old accepted records have no layer digests. Verify the plan's inventory
+			// against the approved manifest before publishing any layer reports.
+			actual, err := publication.PrimaryLayerDigests(lookup, entry.Submission.Artifact.Reference())
+			if err != nil {
+				if ctx.Err() != nil || FailureDisposition(err) == "rejected" {
+					return fmt.Errorf("verify OCI layers for %s@%s: %w", target.Plugin, target.Version, err)
 				}
+				if _, warnErr := fmt.Fprintf(publication.Warnings, "Deferring %s@%s: cannot verify OCI layers: %v\n", target.Plugin, target.Version, err); warnErr != nil {
+					return warnErr
+				}
+				continue
+			}
+			if !slices.Equal(actual, layers) {
+				return fmt.Errorf("planned layers differ from the accepted OCI manifest for %s@%s", target.Plugin, target.Version)
+			}
+		}
+		// A different run can finish the same release between planning and publication.
+		missing := slices.DeleteFunc(observations, func(e compatibility.Evidence) bool {
+			return covered[artifactBinding{e.Release(), e.Report.ArtifactSHA256}]
+		})
+		if len(missing) == 0 {
+			continue
+		}
+		if baseline := releaseRunnerAsOf(stored, target.SHA256); baseline != "" && baseline != missing[0].Report.RunnerAsOf {
+			if _, err := fmt.Fprintf(publication.Warnings, "Deferring %s@%s: runner assessment date is now %s (checked %s)\n", target.Plugin, target.Version, baseline, missing[0].Report.RunnerAsOf); err != nil {
+				return err
+			}
+			continue
+		}
+		for _, e := range missing {
+			if err := store.write(e, &writes); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
 }
 
-func (target CompatibilityTarget) expectedArtifacts(index Index) ([]string, error) {
-	entry, err := Find(index, target.Plugin, target.Version)
-	if err != nil {
-		return nil, err
-	}
+func (target CompatibilityTarget) expectedArtifacts(entry Entry) ([]string, error) {
 	if entry.Name() != target.Plugin || entry.Submission.Digest() != target.SHA256 {
 		return nil, fmt.Errorf("plan does not match the accepted release %s@%s", target.Plugin, target.Version)
 	}
@@ -158,7 +198,7 @@ func compatibilityResultFiles(directory string, expected int) (map[string]os.Fil
 	return files, nil
 }
 
-func readReleaseReports(path string, size int64, layers []string, target CompatibilityTarget, plan CompatibilityPlan, asOf string) (observations []compatibility.Evidence, err error) {
+func readReleaseReports(path string, size int64, layers []string, target CompatibilityTarget, plan CompatibilityPlan) (observations []compatibility.Evidence, err error) {
 	limit := int64(len(layers)) * maxRecordBytes
 	if size > limit {
 		return nil, errors.New("compatibility results exceed the report size limit")
@@ -172,6 +212,7 @@ func readReleaseReports(path string, size int64, layers []string, target Compati
 	if tok, err := dec.ReadToken(); err != nil || tok.Kind() != '[' {
 		return nil, errors.New("expected a JSON array of compatibility reports")
 	}
+	asOf := ""
 	seen := make(map[string]bool, len(layers))
 	for range layers {
 		raw, err := dec.ReadValue()
