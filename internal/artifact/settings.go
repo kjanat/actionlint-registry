@@ -256,37 +256,71 @@ func publishedResource(root *url.URL, ptr jsontext.Pointer) url.URL {
 	return resource
 }
 
-type schemaPattern struct{ *jsregexp.Regexp }
-
-func (p schemaPattern) MatchString(s string) bool {
-	matched, err := p.Regexp.MatchString(s)
-	return err == nil && matched
+type ecmaRegexp interface {
+	fmt.Stringer
+	MatchString(string) (bool, error)
 }
 
-func compileSchemaPattern(pattern string) (jsonschema.Regexp, error) {
-	re, err := jsregexp.Compile(pattern, "u")
-	if err != nil {
-		return nil, err
+type schemaPattern struct {
+	ecmaRegexp
+	matchErr *error
+}
+
+func (p *schemaPattern) MatchString(s string) bool {
+	if *p.matchErr != nil {
+		return false
 	}
-	return schemaPattern{re}, nil
+	matched, err := p.ecmaRegexp.MatchString(s)
+	if err != nil {
+		*p.matchErr = fmt.Errorf("matching schema pattern %q: %w", p.String(), err)
+		return false
+	}
+	return matched
 }
 
-func (d *settingDocument) compile(retrieval string) error {
+// jsonschema expects a bool from MatchString. Run the compiler and any validation
+// in the same callback so a match error also reaches the caller of the check.
+func withSettingsCompiler(check func(*jsonschema.Compiler) error) error {
+	var matchErr error
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
 	c.UseLoader(nil)
-	c.UseRegexpEngine(compileSchemaPattern)
-	if err := c.AddResource(retrieval, d.root); err != nil {
-		return err
+	c.UseRegexpEngine(func(pattern string) (jsonschema.Regexp, error) {
+		re, err := jsregexp.Compile(pattern, "u")
+		if err != nil {
+			return nil, err
+		}
+		return &schemaPattern{re, &matchErr}, nil
+	})
+	err := check(c)
+	if matchErr != nil {
+		return matchErr
 	}
-	// Compiling the root alone skips unused entries in $defs.
+	return err
+}
+
+func (d *settingDocument) compile(retrieval string) error {
+	// jsonschema/v6 scans additionalItems for resources even in Draft 2020-12,
+	// which removed that keyword. Pass it through to the export as literal data.
 	for _, node := range d.nodes {
-		loc := url.URL{Fragment: string(node.ptr)}
-		if _, err := c.Compile(retrieval + loc.String()); err != nil {
-			return err
+		if value, ok := node.obj["additionalItems"]; ok {
+			delete(node.obj, "additionalItems")
+			defer func() { node.obj["additionalItems"] = value }()
 		}
 	}
-	return nil
+	return withSettingsCompiler(func(c *jsonschema.Compiler) error {
+		if err := c.AddResource(retrieval, d.root); err != nil {
+			return err
+		}
+		// Compiling the root alone skips unused entries in $defs.
+		for _, node := range d.nodes {
+			loc := url.URL{Fragment: string(node.ptr)}
+			if _, err := c.Compile(retrieval + loc.String()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // Rebase sets the root $id to the setting URL. Nested resources use the same URL
