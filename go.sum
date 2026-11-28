@@ -11,8 +11,8 @@ github.com/cli/shurcooL-graphql v0.0.4/go.mod h1:3waN4u02FiZivIV+p1y4d0Jo1jc6BVi
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=
 github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
-github.com/go-quickjs/go-quickjs v0.44.0 h1:6ZdbhcKPRkwjrsPdJwt4tCxNRjOzaZq+yIIZADhPVwg=
-github.com/go-quickjs/go-quickjs v0.44.0/go.mod h1:q6Zkn+wp3IAmnsc3bekcorjXlGaR3U3ZKXtHCB6Enn0=
+github.com/go-quickjs/go-quickjs v0.45.2 h1:t1UGto3JiBcukvQZJ9A5qN4Yq0YSVmXvQtQdwmGw498=
+github.com/go-quickjs/go-quickjs v0.45.2/go.mod h1:q6Zkn+wp3IAmnsc3bekcorjXlGaR3U3ZKXtHCB6Enn0=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
