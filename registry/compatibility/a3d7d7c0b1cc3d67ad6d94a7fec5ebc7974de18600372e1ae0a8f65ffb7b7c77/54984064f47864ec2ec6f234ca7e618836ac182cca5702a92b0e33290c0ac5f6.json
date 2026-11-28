@@ -1,0 +1,44 @@
+{
+  "report": {
+    "schema_version": 3,
+    "artifact_sha256": "a3d7d7c0b1cc3d67ad6d94a7fec5ebc7974de18600372e1ae0a8f65ffb7b7c77",
+    "host": {
+      "name": "actionlint",
+      "revision": "012540dc1978"
+    },
+    "policy": "actionlint-smoke/1",
+    "outcome": "unsupported",
+    "checks": [],
+    "runner_as_of": "2026-11-25",
+    "detail": "contract is not supported by this checker: unprovided interface: plugin imports kjanat:actionlint/prepared-scripts@0.2.0, which this host does not grant",
+    "imports": [
+      "kjanat:actionlint/source-files@0.2.0",
+      "kjanat:actionlint/invocation-context@0.2.0",
+      "kjanat:actionlint/prepared-scripts@0.2.0",
+      "wasi:io/poll@0.2.12",
+      "wasi:clocks/monotonic-clock@0.2.12",
+      "wasi:clocks/wall-clock@0.2.12",
+      "wasi:io/error@0.2.12",
+      "wasi:io/streams@0.2.12",
+      "wasi:cli/stdout@0.2.12",
+      "wasi:cli/stderr@0.2.12",
+      "wasi:cli/stdin@0.2.12",
+      "wasi:cli/environment@0.2.12",
+      "wasi:cli/exit@0.2.12",
+      "wasi:cli/terminal-input@0.2.12",
+      "wasi:cli/terminal-output@0.2.12",
+      "wasi:cli/terminal-stdin@0.2.12",
+      "wasi:cli/terminal-stdout@0.2.12",
+      "wasi:cli/terminal-stderr@0.2.12",
+      "wasi:filesystem/types@0.2.12",
+      "wasi:filesystem/preopens@0.2.12",
+      "wasi:random/insecure-seed@0.2.12"
+    ],
+    "exports": [
+      "kjanat:actionlint/tool-integration@0.2.0",
+      "kjanat:actionlint/analyzer@0.2.0"
+    ]
+  },
+  "checker_sha256": "e45f13c771d75e15b0e5ec0acf9023a28270bef870d8ff16feee6120e9a89be7",
+  "observed_at": "2026-11-28T01:22:38.632354308Z"
+}

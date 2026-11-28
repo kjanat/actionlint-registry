@@ -1,0 +1,31 @@
+{
+  "report": {
+    "schema_version": 3,
+    "artifact_sha256": "059450bf4c7c44ed9d9fb89a123bca5a3a2a7adb4d81d5b1c13db02b7d736202",
+    "host": {
+      "name": "actionlint",
+      "revision": "012540dc1978"
+    },
+    "policy": "actionlint-smoke/1",
+    "outcome": "passed",
+    "checks": [
+      "host-wit-contract",
+      "script-engine",
+      "rule-descriptors",
+      "application-registration",
+      "default-config",
+      "repeated-sample",
+      "diagnostic-ranges",
+      "embedded-metadata",
+      "static-runtime-consistency"
+    ],
+    "runner_as_of": "2026-11-25",
+    "imports": [],
+    "exports": [
+      "kjanat:actionlint/script-engine@0.2.0",
+      "kjanat:actionlint/template-effects@0.2.0"
+    ]
+  },
+  "checker_sha256": "e45f13c771d75e15b0e5ec0acf9023a28270bef870d8ff16feee6120e9a89be7",
+  "observed_at": "2026-11-28T01:22:51.993360751Z"
+}
