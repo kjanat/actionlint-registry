@@ -1,5 +1,5 @@
-actionlint.kjanat.dev/v2 v2.0.0-20261127154132-012540dc1978 h1:/5CXfDaf5vmPy74NuxN7rWW46AlEIqUQnoHy+hOnKCc=
-actionlint.kjanat.dev/v2 v2.0.0-20261127154132-012540dc1978/go.mod h1:7N3ZhA9X+UBh0dVE6UzyeNwf/eUx6EWczwyhOaBuIVM=
+actionlint.kjanat.dev/v2 v2.0.0-20261128180047-eeb2cd4b8d3d h1:yl8ZtcPqVhRhZMJJhgJBObryHuprPqbYqEHL9RyiG7k=
+actionlint.kjanat.dev/v2 v2.0.0-20261128180047-eeb2cd4b8d3d/go.mod h1:TiHviIl/iGFjIMthnQMsBS8AR1EkhM2PSS5csS18poA=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
